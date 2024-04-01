@@ -1,0 +1,582 @@
+import openpyxl
+import random
+from datetime import datetime
+import tkinter.font as tkFont
+import tkinter.filedialog as filedialog
+from anticaptchaofficial.imagecaptcha import *
+from openpyxl.utils.dataframe import dataframe_to_rows
+import webbrowser
+import pyperclip
+import time
+from tkinter import PhotoImage
+from selenium import webdriver
+from selenium.webdriver.common.keys import Keys
+from selenium.webdriver.common.action_chains import ActionChains
+from selenium.webdriver.common.by import By
+from selenium.webdriver.support.ui import WebDriverWait
+from selenium.webdriver.support import expected_conditions as EC
+from selenium.common.exceptions import TimeoutException, NoSuchElementException
+import tkinter as tk
+from tkinter import ttk
+from tkinter import messagebox
+import pytesseract
+import threading
+from bs4 import BeautifulSoup
+from ppadb.client import Client as AdbClient 
+import pandas as pd
+import sys
+
+time1 = random.uniform(0.1, 0.5)
+time2 = random.uniform(1, 1.5)
+
+class RedirectText(object):
+    def __init__(self, text_widget):
+        self.output = text_widget
+        self.font = tkFont.Font(size=13)  # 폰트 크기 설정
+        self.output.tag_configure("font", font=self.font)  # 폰트 적용
+
+    def write(self, string):
+        self.output.insert(tk.END, string, "font")
+        self.output.see(tk.END)  # 스크롤바 자동 이동
+
+    def flush(self):
+        pass
+
+class NaverCafeJoinApp:
+    def __init__(self, root):
+        root.title("네이버 카페 가입 자동화")
+        root.geometry("400x500")
+
+        # 프레임 구성
+        self.input_frame = tk.Frame(root)
+        self.progress_frame = tk.Frame(root)
+
+        # 프레임을 겹쳐서 배치하지만, 한 번에 하나만 보임
+        self.input_frame.pack(fill=tk.BOTH, expand=True)
+        self.progress_frame.pack(fill=tk.BOTH, expand=True)
+        self.progress_frame.pack_forget()  # 초기에는 progress_frame 숨김
+
+        self.setup_input_frame()
+
+        self.progress_text = tk.Text(self.progress_frame)
+        self.progress_text.pack(fill=tk.BOTH, expand=True)
+
+        # 로그 출력 리디렉션
+        sys.stdout = RedirectText(self.progress_text)
+
+    def setup_input_frame(self):
+    
+        # 폰트 설정
+        label_font = ('Arial', 12)  # 라벨 폰트 크기 조정
+        entry_font = ('Arial', 12)  # 입력 필드 폰트 크기 조정
+        button_font = ('Arial', 12)  # 버튼 폰트 크기 조정
+        
+        # 로그인 정보 입력 (폰트 크기 조정 및 padx, pady로 패딩 추가)
+        self.id_label = tk.Label(self.input_frame, text="네이버 아이디", font=label_font)
+        self.id_label.pack(pady=(10, 10))  # 상단 패딩 추가
+        self.id_entry = tk.Entry(self.input_frame, font=entry_font)
+        self.id_entry.pack(pady=(5, 10))  # 위아래 패딩 추가
+        
+        self.pw_label = tk.Label(self.input_frame, text="네이버 비밀번호", font=label_font)
+        self.pw_label.pack(pady=(10, 0))
+        self.pw_entry = tk.Entry(self.input_frame, show="*", font=entry_font)
+        self.pw_entry.pack(pady=(5, 10))
+        
+        # 파일 선택 버튼 (폰트 크기 조정)
+        self.file_button = tk.Button(self.input_frame, text="카페 가입 파일 선택", font=button_font, command=self.output_file)
+        self.file_button.pack(pady=(10, 10))
+        # 파일 경로 라벨
+        self.file_path_label = tk.Label(self.input_frame, text="", font=('Arial', 10))
+        self.file_path_label.pack(pady=(5, 10))
+        
+        # Tethering checkbox (폰트 크기 조정)
+        self.tethering_var = tk.IntVar()
+        self.tethering_checkbox = tk.Checkbutton(self.input_frame, text="자동 테더링모드", font=label_font, variable=self.tethering_var)
+        self.tethering_checkbox.pack(pady=(10, 10))
+        
+        # Checkbox for '가입질문 추출' (Extract Join Questions)
+        self.extract_var = tk.IntVar()
+        self.extract_checkbox = tk.Checkbutton(self.input_frame, text="가입질문 추출", font=button_font,  variable=self.extract_var)
+        self.extract_checkbox.pack()
+
+        # Checkbox for '카페 가입하기' (Register on Cafe)
+        self.register_var = tk.IntVar()
+        self.register_checkbox = tk.Checkbutton(self.input_frame, text="카페 가입하기", font=button_font,  variable=self.register_var)
+        self.register_checkbox.pack()
+
+        # 시작 버튼 (폰트 크기 조정)
+        self.start_button = tk.Button(self.input_frame, text="시작", font=button_font, command=self.start_process)
+        self.start_button.pack(pady=(10, 10))
+        
+        # 참고 영상 버튼 추가
+        self.reference_video_button = tk.Button(self.input_frame, text="사용 방법", font=button_font, command=self.open_reference_video)
+        self.reference_video_button.pack(pady=(10, 10))
+
+
+
+    
+    # 새로운 메서드 추가: 참고 영상 URL을 열기 위한 함수
+    def open_reference_video(self):
+        video_url = "https://youtu.be/zz3Mde60RqY?si=MJagmk_iupgla4BB"  # 여기에 실제 유튜브 링크를 넣으세요.
+        webbrowser.open(video_url)
+
+
+    def load_login_file(self):
+        file_path = filedialog.askopenfilename(filetypes=[("Text files", "*.txt")])
+        if file_path:
+            self.accounts = self.load_accounts_from_file(file_path)
+            loaded_ids = ', '.join([account[0] for account in self.accounts])  # 로드된 아이디들을 나열
+            self.progress_text.insert(tk.END, f"로드된 아이디: {loaded_ids}\n")
+
+
+    def load_accounts_from_file(self, file_path):
+        accounts = []
+        with open(file_path, 'r') as file:
+            for line in file:
+                line = line.strip()
+                if ',' in line:
+                    id_pw = line.split(',')
+                    if len(id_pw) == 2:
+                        accounts.append((id_pw[0].strip(), id_pw[1].strip()))
+        return accounts
+
+    def output_file(self):
+        file_path = filedialog.askopenfilename(filetypes=[("Excel files", "*.xlsx")])
+        if file_path:
+            self.selected_file = file_path
+            self.output_file = file_path
+            self.progress_text.insert(tk.END, f"선택된 파일: {file_path}\n")
+            self.df_combined = pd.read_excel(self.selected_file)
+            self.file_path_label.config(text=f"선택된 파일: {file_path}")
+          
+
+    def print(self, message):
+        # 메시지를 텍스트 박스에 출력하는 메서드
+        self.progress_text.insert(tk.END, message + "\n")
+        self.progress_text.see(tk.END)
+
+    
+    def run_register_on_cafe_script(self):
+        # 카페 가입을 위한 스크립트 작성
+        for idx, row in self.df_combined.iterrows():
+            cafe_url = row['카페주소']
+            if pd.isna(cafe_url):
+                print("추출 작업이 완료되었습니다.")
+                break
+            register_on_cafe(self.driver, row['카페주소'], self.df_combined, idx, self.output_file, row)
+        print("가입 작업이 완료되었습니다.")
+        self.driver.quit()
+    def run_extract_script(self):
+        for idx, row in self.df_combined.iterrows():
+            cafe_url = row['카페주소']
+            if pd.isna(cafe_url):
+                print("추출 작업이 완료되었습니다.")
+                break
+
+            extract(self.driver, cafe_url, self.df_combined, idx, self.output_file)
+        
+        # 모든 행을 처리한 후 WebDriver 종료
+        self.driver.quit()
+
+    def start_process(self):
+        self.input_frame.pack_forget()  # 입력 프레임 숨김
+        self.progress_frame.pack(fill=tk.BOTH, expand=True)  # 진행 프레임 표시
+
+        # Check if either '카페 가입하기' or '가입질문 추출' is checked
+        if self.register_var.get() == 0 and self.extract_var.get() == 0:
+            messagebox.showwarning("경고", "하나의 작업을 선택해야 합니다.")
+            return
+        if self.register_var.get() == 1 and self.extract_var.get() == 1:
+            messagebox.showwarning("경고", "가입질문 추출과 카페 가입하기 중 하나만 선택해야 합니다.")
+            return
+
+        self.toggle_airplane_mode()
+
+        naver_id = self.id_entry.get()
+        naver_pw = self.pw_entry.get()
+        self.driver = setup_chrome_driver()
+        login(self.driver, naver_id, naver_pw)
+        
+        # 작업을 순차적으로 실행합니다.
+        if self.register_var.get() == 1:
+            threading.Thread(target=self.run_register_on_cafe_script).start()
+        if self.extract_var.get() == 1:
+            threading.Thread(target=self.run_extract_script).start()
+        
+
+    def toggle_airplane_mode(self):
+        if self.tethering_var.get() == 1:  # 수정된 부분
+            print("ip주소를 변경합니다.")
+            # Connect to the ADB server
+            adb = AdbClient(host="127.0.0.1", port=5037)
+
+            devices = adb.devices()
+            if len(devices) == 0:
+                print("연결이 되어있지 않습니다.")
+                quit()
+
+            device = devices[0]
+            # Turn on airplane mode
+            device.shell("settings put global airplane_mode_on 1")
+            device.shell("am broadcast -a android.intent.action.AIRPLANE_MODE --ez state true")
+            time.sleep(5)
+
+            device.shell("settings put global airplane_mode_on 0")
+            device.shell("am broadcast -a android.intent.action.AIRPLANE_MODE --ez state false")
+            time.sleep(20)
+
+        else:
+            pass
+
+def cafe_info(driver, df_combined, idx):
+    # '카페소개' 버튼 클릭
+    driver.find_element(By.CSS_SELECTOR, "a.u.gm-tcol-c").click()
+    time.sleep(time2)  # 카페소개 페이지 로딩 대기
+
+    driver.switch_to.frame("cafe_main")
+    req = driver.page_source
+    soup = BeautifulSoup(req, 'html.parser')
+
+    # Use the correct selector for the element
+    cafe_name_element = soup.select_one("strong.cafe_name")
+    cafe_name = cafe_name_element.get_text()
+
+    # Extract Cafe Join Condition
+    cafe_join_condition_element = soup.select_one("th:-soup-contains('카페 가입 조건') + td")
+    if cafe_join_condition_element:
+        cafe_join_condition = cafe_join_condition_element.get_text(separator=' / ', strip=True)
+    else:
+        cafe_join_condition = ""
+
+    # Extract Writing Condition
+    writing_condition_element = soup.select_one("th:contains('글쓰기 조건') + td")
+    if writing_condition_element:
+        writing_condition = writing_condition_element.get_text(strip=True)
+    else:
+        writing_condition = ""
+
+    # Extract Cafe Activity
+    cafe_activity_element = soup.select_one("th:contains('카페 활동') + td")
+    if cafe_activity_element:
+        # Extract individual counts
+        member_count_element = cafe_activity_element.select_one("span.count:nth-of-type(1)")
+        member_count = member_count_element.get_text(strip=True) if member_count_element else "Not available"
+
+        post_count_element = cafe_activity_element.select_one("span.count:nth-of-type(2)")
+        post_count = post_count_element.get_text(strip=True) if post_count_element else "Not available"
+
+        visitor_count_element = cafe_activity_element.select_one("span.count:nth-of-type(3)")
+        visitor_count = visitor_count_element.get_text(strip=True) if visitor_count_element else "Not available"
+
+        cafe_activity = f"카페멤버: {member_count}, 전체 게시글: {post_count}, 총 방문자: {visitor_count}"
+    else:
+        cafe_activity = ""
+    
+    
+    df_combined.at[idx, '카페명'] = str(cafe_name)
+    df_combined.at[idx, '카페가입조건'] = str(cafe_join_condition)
+    df_combined.at[idx, '글쓰기조건'] = str(writing_condition)  # Casting to string
+    df_combined.at[idx, '카페활동'] = str(cafe_activity) 
+
+    driver.back()
+    time.sleep(time2)
+    driver.switch_to.default_content()
+   
+    # 카페 정보 추출 함수
+
+def extract(driver, cafe_url, df_combined, idx, output_file):
+    if df_combined.at[idx, '비고'] in ['가입실패', '가입질문작성']:
+        print(f"{cafe_url} - 처리 중단: {df_combined.at[idx, '비고']}")
+        return
+    
+    try:
+        driver.get(cafe_url)
+        time.sleep(time2)
+        join_button_element = driver.find_element(By.CSS_SELECTOR, "#cafe-info-data > div.cafe-write-btn > a")
+    except NoSuchElementException:
+        print(f"{cafe_url} - 주소를 찾을 수 없어 다음 카페로 넘어갑니다.")
+        df_combined.at[idx, '비고'] = '가입실패'
+        df_combined.to_excel(output_file, index=False)
+        return
+    
+    join_button_text = join_button_element.text.strip() if join_button_element else ''
+
+    if '카페 글쓰기' in join_button_text:
+        df_combined.at[idx, '비고'] = '가입완료'
+        print(f"{cafe_url} - 가입완료")
+        df_combined.to_excel(output_file, index=False)
+        return
+    if '가입 대기중' in join_button_text:  # 이미 가입한 경우-가입인사작성,가입인사없음
+        df_combined.at[idx, '비고'] = '가입대기'
+        print(f"{cafe_url} - 가입대기")
+        df_combined.to_excel(output_file, index=False)  # 변경된 부분
+        return
+    if '카페 가입하기' in join_button_text:  # 가입하기-실명카페,가입질문작성
+        cafe_info(driver, df_combined, idx)  # Pass the required arguments to the function
+        cafe_name = df_combined.at[idx, '카페명']
+        join_button = driver.find_element(By.CSS_SELECTOR, "a._rosRestrict")
+        join_button.click()
+        time.sleep(time2)
+        try: #실명인증
+            alert = WebDriverWait(driver, 1).until(EC.alert_is_present())
+            alert.dismiss()
+            df_combined.at[idx, '비고'] = '실명인증'
+            print(f"{cafe_name} - 실명인증")
+            df_combined.to_excel(output_file, index=False)  # 변경된 부분
+        except TimeoutException:
+            # 별명 입력 창을 찾습니다.
+            driver.switch_to.frame("cafe_main")
+            req = driver.page_source
+            soup = BeautifulSoup(req, 'html.parser')
+            nickname_input_element = soup.find('input', {'id': 'cafeNicknameInput'})
+            
+            # 기간,연령다르면 '가입실패'로 기록
+            if not nickname_input_element:
+                df_combined.at[idx, '비고'] = '가입실패'
+                print(f"{cafe_name} - 가입실패")
+                df_combined.to_excel(output_file, index=False)  # 변경된 부분
+            else:
+                # 별명 입력 창이 있으면 다른 가입 절차 진행
+                subjective_question_elements = soup.select(".join_qna_area:has(textarea)")
+                subjective_questions = [''] * 5
+                if subjective_question_elements:
+                    extracted_questions = [element.select_one(".question_text").get_text(strip=True) for element in subjective_question_elements]
+                    for q_idx, question in enumerate(extracted_questions, start=0):
+                        if q_idx < 5:
+                            subjective_questions[q_idx] = question
+                df_combined.at[idx, '비고'] = '가입질문작성'
+                print(f"{cafe_name} - 가입질문작성")
+                if subjective_questions:
+                    for q_idx, question in enumerate(subjective_questions, start=1):
+                        df_combined.at[idx, f'질문{q_idx}'] = question if q_idx <= len(subjective_questions) else ""
+                df_combined.to_excel(output_file, index=False)  # 변경된 부분
+            return
+
+def register_on_cafe(driver, cafe_url, df_combined, idx, output_file, row):  # If using a global counter, otherwise, pass it as an argument
+    if df_combined.at[idx, '비고'] in ['가입실패','가입완료']:
+        return
+    if pd.isna(df_combined.at[idx, '닉네임']):
+        return
+    cafe_url = df_combined.at[idx, '카페주소']
+    nickname = df_combined.at[idx, '닉네임']  # 닉네임을 현재 행에서 가져옵니다.
+    cafe_name = df_combined.at[idx, '카페명']
+    driver.get(cafe_url)
+    time.sleep(time2)
+    change_element = driver.find_element(By.CSS_SELECTOR, "#cafe-info-data > div.cafe-write-btn > a")
+    change_text = change_element.text.strip() if change_element else ''
+    if '카페 글쓰기' in change_text:
+        df_combined.at[idx, '비고'] = '가입완료'
+        df_combined.to_excel(output_file, index=False)
+        return   
+    change_element.click()
+    try:
+        alert = WebDriverWait(driver, 1).until(EC.alert_is_present())
+        alert_text = alert.text
+        if "일일 50개 이상의 카페에 가입하실 수 없습니다." in alert_text:
+            alert.accept()  # 확인 버튼을 누릅니다.
+            print("일일 50개 이상의 카페에 가입하실 수 없어서 종료합니다.")
+            driver.quit()
+            return
+        elif "매니저가 승인하면 카페에 가입됩니다." in alert_text:
+            alert.dismiss()  # 취소 버튼을 누릅니다.
+            print(f"{cafe_name} - 가입대기")
+            df_combined.to_excel(output_file, index=False)  # 변경된 부분을 저장합니다.
+            return
+        elif "실명 확인 회원만 가입이 가능합니다." in alert_text:
+            alert.dismiss()  # 다른 알림창의 경우 닫습니다.
+            print(f"{cafe_name} - 실명인증")
+            df_combined.at[idx, '비고'] = '실명인증'
+            df_combined.to_excel(output_file, index=False)  # 변경된 부분을 저장합니다.
+            return
+    except TimeoutException:
+        driver.switch_to.frame(driver.find_element(By.CSS_SELECTOR, 'iframe#cafe_main'))
+        html = driver.page_source
+        soup = BeautifulSoup(html, 'html.parser')
+        time.sleep(time1)
+        reset_button = driver.find_element(By.CSS_SELECTOR, "button.btn_close")
+        reset_button.click()
+        nickname_input = driver.find_element(By.ID, "cafeNicknameInput")
+        nickname_input.clear()
+        nickname_input.send_keys(nickname)
+        time.sleep(time2)
+        WebDriverWait(driver, 1).until(
+            lambda driver: driver.find_element(By.CSS_SELECTOR, "em.info_text")
+        )
+        time.sleep(2)
+        response_text = driver.find_element(By.CSS_SELECTOR, "em.info_text").text
+        if "사용할 수 있는 별명입니다." in response_text:
+            pass
+        elif "이미 사용 중인 별명입니다." in response_text:
+            df_combined.at[idx, '비고'] = '중복닉네임'
+            print(f"{cafe_name} - 중복닉네임")
+            df_combined.to_excel(output_file, index=False)  # 변경된 부분
+            return  # Skip to the next cafe
+        
+        try:
+    
+            # 질문 영역을 가져옵니다.
+            question_areas = WebDriverWait(driver, 1).until(
+                EC.presence_of_all_elements_located((By.CSS_SELECTOR, ".join_qna_area"))
+            )
+            current_row_questions = {
+                    row[f'질문{q_idx}']: row[f'답변{q_idx}']
+                    if pd.notna(row[f'답변{q_idx}'])  
+                    else '네'
+                    for q_idx in range(1, 6) if pd.notna(row[f'질문{q_idx}'])
+                }
+        
+            # 주관식 질문을 처리하는 부분
+            for q_area in question_areas:
+                # 주관식 질문 처리
+                textarea_elements = q_area.find_elements(By.CSS_SELECTOR, "textarea.answer_textarea")
+                question_text_elements = q_area.find_elements(By.CSS_SELECTOR, ".question_text")
+            
+                if textarea_elements and question_text_elements:
+                    question_text = question_text_elements[0].text.strip()
+                    # 현재 작업중인 행에서 질문 텍스트에 맞는 답변을 찾습니다.
+                    # 답변이 비어있으면 '네'로 기본값 설정
+                    matched_answer = current_row_questions.get(question_text, '네')
+
+                    # 답변 필드를 비우고, 매칭된 답변을 입력합니다.
+                    textarea_elements[0].clear()
+                    textarea_elements[0].send_keys(matched_answer)
+                # 객관식 질문 처리
+                radio_buttons = q_area.find_elements(By.CSS_SELECTOR, "input[type='radio']")
+                labels_for_radio_buttons = q_area.find_elements(By.CSS_SELECTOR, "label")
+                if radio_buttons and labels_for_radio_buttons:
+                    # 일치하는 라벨을 클릭합니다 (라디오 버튼 대신).
+                    # 예: 첫 번째 옵션을 선택하거나, 특정 조건에 맞는 옵션을 선택합니다.
+                    labels_for_radio_buttons[0].click()  # 첫 번째 라벨을 클릭합니다.
+
+        except TimeoutException:
+            # 질문 영역이 없으므로 예외 처리
+            pass
+        try:
+            WebDriverWait(driver, 1).until(EC.element_to_be_clickable((By.CSS_SELECTOR, 'label[for="check_join_agree_once"]')))
+            terms_agreement_label = driver.find_element(By.CSS_SELECTOR, 'label[for="check_join_agree_once"]')
+            driver.execute_script("arguments[0].click();", terms_agreement_label)
+        except TimeoutException:
+            pass
+        while True:
+            # 캡차 해결
+            captcha_solution = Call_Back_Captcha(driver, solver)
+            captcha_input = driver.find_element(By.CSS_SELECTOR, 'input#captcha')
+            captcha_input.clear()
+            captcha_input.send_keys(captcha_solution)
+            time.sleep(time2)
+            
+            agree_button = driver.find_element(By.CSS_SELECTOR, "#app > div > div.join_btn > a")
+            agree_button.click()
+            time.sleep(1)
+
+            try:
+                # '잘못 입력하셨습니다' 메시지 확인
+                captcha_error_msg = WebDriverWait(driver, 2).until(
+                    EC.presence_of_element_located((By.CSS_SELECTOR, 'label[for="captcha"].label_text'))
+                ).text
+                if '자동 가입 방지를 위한 문자를 잘못 입력하셨습니다' in captcha_error_msg:
+                    continue
+            except Exception as e:
+                time.sleep(2)
+                break
+        
+        driver.switch_to.default_content()
+        try:
+            final_elements = driver.find_elements(By.CSS_SELECTOR, 'a._rosRestrict')
+            final_text = final_elements[0].text.strip() if final_elements else ''
+        
+            if '가입 대기중' in final_text:  # 이미 가입한 경우-가입인사작성,가입인사없음
+                df_combined.at[idx, '비고'] = '가입대기'
+                print(f"{cafe_name} - 가입대기")
+                df_combined.to_excel(output_file, index=False)  # 변경된 부분
+                return  # '가입대기' 상태 설정 후 함수 종료
+        except:
+            pass
+        try:
+            # '가입을 환영합니다!' 메시지가 포함된 이미지의 alt 속성을 확인
+            welcome_message = WebDriverWait(driver, 2).until(
+                EC.presence_of_element_located((By.CSS_SELECTOR, "h2.tit img[src*='h_ly_welcome.gif']"))
+            )
+            alt_text = welcome_message.get_attribute('alt') if welcome_message else ''
+            if '가입을 환영합니다!' in alt_text:
+                # 메시지가 확인되면 가입 완료로 처리
+                close_button = driver.find_element(By.CSS_SELECTOR, "a.btn_type_wh")
+                close_button.click()
+                time.sleep(time2)
+                df_combined.at[idx, '비고'] = '가입완료'
+                print(f"{cafe_name} - 가입완료")
+                df_combined.to_excel(output_file, index=False)  # 변경된 부분
+                return
+        except (NoSuchElementException, TimeoutException):
+            time.sleep(time2)
+            change_element = driver.find_element(By.CSS_SELECTOR, "#cafe-info-data > div.cafe-write-btn > a")
+            change_text = change_element.text.strip() if change_element else ''
+
+            if '카페 글쓰기' in change_text:
+                df_combined.at[idx, '비고'] = '가입완료'
+                print(f"{cafe_url} - 가입완료")
+                df_combined.to_excel(output_file, index=False)  # 변경된 부분
+                return
+
+# 캡차 해결 함수
+def Call_Back_Captcha(driver, solver) -> str:
+    driver.find_element(By.XPATH, "//img[@class='image']").screenshot('captcha.png')
+    Captcha_Text = solver.solve_and_return_solution("captcha.png")
+    return Captcha_Text
+
+# 크롬 드라이버 설정 함수
+def setup_chrome_driver():
+    chrome_driver_path = "C:\Program Files\Google\Chrome\Application\chrome.exe"
+    options = webdriver.ChromeOptions()
+    options.add_argument('user-agent=Mozilla/5.0 (Windows NT 6.3; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/63.0.3239.132 Safari/537.36')
+    
+    driver = webdriver.Chrome()
+    return driver
+
+def login(driver, my_id, my_pw):
+    login_url = "https://nid.naver.com/nidlogin.login"
+    try:
+        driver.get(login_url)
+        time.sleep(time2)
+        switch_btn = driver.find_element(By.CSS_SELECTOR, ".switch_btn")
+        switch_status = driver.find_element(By.CSS_SELECTOR, ".switch_btn .blind").text
+
+        # switch_status가 "off"일 경우에만 클릭합니다.
+        if switch_status.lower() == "on":
+            switch_btn.click()
+        time.sleep(time1)
+        id_selector = "#id"
+        pw_selector = "#pw"
+        login_btn_selector = "#log\\.login"
+        id_input = driver.find_element(By.CSS_SELECTOR, id_selector)
+        pw_input = driver.find_element(By.CSS_SELECTOR, pw_selector)
+        login_btn = driver.find_element(By.CSS_SELECTOR, login_btn_selector)
+        id_input.click()
+        pyperclip.copy(my_id)
+        ActionChains(driver).key_down(Keys.CONTROL).send_keys("v").key_up(Keys.CONTROL).perform()
+        pw_input.click()
+        pyperclip.copy(my_pw)
+        ActionChains(driver).key_down(Keys.CONTROL).send_keys("v").key_up(Keys.CONTROL).perform()
+        login_btn.click()
+        time.sleep(time1)    
+    except Exception as e:
+        driver.refresh()
+        time.sleep(time2)
+        return login(driver, my_id, my_pw)
+
+
+
+# Captcha 설정
+solver = imagecaptcha()
+solver.set_verbose(0)
+solver.set_key("08cf045a24d9010a720795c57a225b39")
+
+def main():
+    root = tk.Tk()
+    app = NaverCafeJoinApp(root)
+    root.mainloop()
+
+
+
+if __name__ == "__main__":
+    main()
