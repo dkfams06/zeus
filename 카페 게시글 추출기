@@ -1,0 +1,817 @@
+from selenium import webdriver
+from selenium.webdriver.common.by import By
+from selenium.webdriver.support.ui import WebDriverWait
+from selenium.webdriver.support import expected_conditions as EC
+from selenium.webdriver.common.action_chains import ActionChains
+from selenium.webdriver.common.keys import Keys
+from selenium.common.exceptions import NoAlertPresentException
+import time
+from datetime import datetime
+import pickle  # 파일 저장 및 불러오기를 위해 필요
+import tkinter as tk
+from tkinter import ttk
+import tkinter.filedialog as filedialog
+import threading
+import pandas as pd
+from tkinter import PhotoImage
+import openpyxl
+from selenium.common.exceptions import NoSuchElementException, TimeoutException
+from bs4 import BeautifulSoup
+import pyperclip
+import random
+from ppadb.client import Client as AdbClient
+import tkinter.messagebox as messagebox
+from selenium import webdriver
+import webbrowser
+import os
+import re
+
+# 전역 변수로 driver 선언
+global_driver = None
+logged_in_naver_id = None
+
+time1 = random.uniform(0.1, 0.5)
+time2 = random.uniform(0.5, 1.5)
+
+def read_login_file():
+    global login_file_path  # Declare it as global within the function
+    global account_list  
+
+    file_path = filedialog.askopenfilename(filetypes=[("Text files", "*.txt")])
+    if file_path:
+        login_file_path.set(file_path)  # 파일 경로 저장
+        with open(file_path, 'r', encoding='utf-8') as file:
+
+            account_list = []
+            for line in file:
+                if ',' in line:
+                    line = line.strip()  # 줄바꿈 및 공백 제거
+                    parts = line.split(',')
+                    if len(parts) == 2:
+                        account_list.append(parts)
+        # 리스트박스 업데이트
+        account_listbox.delete(0, tk.END)  # 기존 리스트박스 내용을 지움
+        for account in account_list:
+            account_listbox.insert(tk.END, account[0])  # 아이디만 리스트박스에 추가
+
+
+
+def setup_chrome_driver():
+    chrome_driver_path = "C:\Program Files\Google\Chrome\Application\chrome.exe"
+    options = webdriver.ChromeOptions()
+    options.add_argument('user-agent=Mozilla/5.0 (Windows NT 6.3; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/63.0.3239.132 Safari/537.36')
+    #options.add_argument("--headless")  # 헤드리스 모드 활성화
+    driver = webdriver.Chrome(options=options)
+    return driver
+
+# 로그인 버튼 클릭 시 실행되는 함수
+def on_login_button_click():
+    global global_driver
+    
+    selected_indices = account_listbox.curselection()
+    selected_index = selected_indices[0]
+    selected_account = account_list[selected_index]
+    naver_id, naver_pw = selected_account  # Unpack the ID and password
+    if not global_driver:
+        global_driver = setup_chrome_driver()
+    thread = threading.Thread(target=login_and_update, args=(naver_id, naver_pw, selected_index))
+    thread.daemon = True  # Set as a daemon so it doesn't prevent the app from exiting
+    thread.start()
+
+
+def login_and_update(naver_id, naver_pw, selected_index):
+    global global_driver
+    global logged_in_naver_id
+    logged_in_naver_id = naver_id
+    time.sleep(time1)
+    login(global_driver, naver_id, naver_pw)
+    update_cafe_list(selected_index, account_list, cafe_listbox)
+
+def login(driver, my_id, my_pw):
+    login_url = "https://nid.naver.com/nidlogin.login"
+    try:
+        driver.get(login_url)
+        time.sleep(time2)
+        # "switch_btn" 요소를 찾고, 내부의 "span" 요소의 텍스트가 "off"인지 확인합니다.
+        switch_btn = driver.find_element(By.CSS_SELECTOR, ".switch_btn")
+        switch_status = driver.find_element(By.CSS_SELECTOR, ".switch_btn .blind").text
+
+        # switch_status가 "off"일 경우에만 클릭합니다.
+        if switch_status.lower() == "on":
+            switch_btn.click()
+        time.sleep(time1)
+        id_selector = "#id"
+        pw_selector = "#pw"
+        login_btn_selector = "#log\\.login"
+        id_input = driver.find_element(By.CSS_SELECTOR, id_selector)
+        pw_input = driver.find_element(By.CSS_SELECTOR, pw_selector)
+        login_btn = driver.find_element(By.CSS_SELECTOR, login_btn_selector)
+        id_input.click()
+        pyperclip.copy(my_id)
+        ActionChains(driver).key_down(Keys.CONTROL).send_keys("v").key_up(Keys.CONTROL).perform()
+        pw_input.click()
+        pyperclip.copy(my_pw)
+        ActionChains(driver).key_down(Keys.CONTROL).send_keys("v").key_up(Keys.CONTROL).perform()
+        login_btn.click()
+        time.sleep(1)    
+    except Exception as e:
+        driver.refresh()
+        time.sleep(time2)
+        return login(driver, my_id, my_pw)
+
+
+#선택된거 로그인하기. 카페 목록가져오기
+def update_cafe_list(selected_index, account_list, cafe_listbox):
+    global cafe_info_list  # 전역 변수 사용 선언
+    global global_driver
+    # 카페 목록 가져오기
+    cafe_info_list = []
+    time.sleep(time1)
+    # 카페 목록 페이지로 이동
+    global_driver.get('https://section.cafe.naver.com/ca-fe/home/manage-my-cafe/join')
+    time.sleep(time2)
+
+    try:
+        # 페이지네이션 찾기
+        pagination = global_driver.find_element(By.CLASS_NAME, 'SectionPagination')
+        page_items = pagination.find_elements(By.CLASS_NAME, 'page_item')
+        num_pages = len(page_items)
+    except NoSuchElementException:
+        # 페이지네이션이 없다면, 한 페이지만 있다고 가정
+        num_pages = 1
+
+    current_page = 1
+    while current_page <= num_pages:
+        req = global_driver.page_source
+        soup = BeautifulSoup(req, 'html.parser')
+
+        for tr in soup.find_all('tr'):
+            cafe_link = tr.find('a', class_='cafe_name')
+            
+            if cafe_link:
+                cafe_name = cafe_link.get_text(strip=True)
+                cafe_url = cafe_link['href']
+                cafe_info_list.append((cafe_name, cafe_url))  # 카페 이름, URL, 닉네임 저장
+                
+        if current_page < num_pages:
+            try:
+                next_page_number = current_page + 1
+                next_page_btn = WebDriverWait(global_driver, 1).until(
+                    EC.element_to_be_clickable((By.XPATH, f'//a[contains(@class, "page_item") and text()="{next_page_number}"]'))
+                )
+                next_page_btn.click()
+                time.sleep(time1)
+                current_page += 1
+            except TimeoutException:
+                print_to_textbox("가입된 카페 리스트 추출이 완료되었습니다.")  # 외부 정의 필요
+                break
+        else:
+            break
+    cafe_listbox.delete(0, 'end')  # 리스트박스의 기존 항목을 모두 삭제
+    for cafe_name, _ in cafe_info_list:
+        cafe_listbox.insert('end', cafe_name)  # 카페 이름을 리스트박스에 추가
+
+
+def filter_and_display_cafes(search_term):
+    cafe_listbox.delete(0, tk.END)  # 기존 리스트박스 내용을 지움
+    filtered_cafes = [cafe for cafe in cafe_info_list if search_term.lower() in cafe[0].lower()]
+    for cafe in filtered_cafes:
+        cafe_listbox.insert(tk.END, cafe[0])  # 필터링된 카페 이름을 리스트박스에 추가
+
+def add_placeholder_cafe(entry, placeholder, callback=None):
+    """Entry 위젯에 플레이스홀더와 선택적 콜백 함수를 추가하는 함수"""
+    entry.insert(0, placeholder)
+    entry.config(fg='grey')
+    entry.bind("<FocusIn>", lambda event: on_entry_click(event, placeholder))
+    entry.bind("<FocusOut>", lambda event: on_focusout(event, placeholder))
+
+    if callback:
+        # 사용자 입력에 반응하여 콜백 함수 호출
+        entry.bind("<KeyRelease>", lambda event: callback())
+
+def on_entry_click(event, placeholder):
+    """Entry 위젯 클릭 시 실행되는 이벤트 핸들러"""
+    if event.widget.get() == placeholder:
+        event.widget.delete(0, "end")
+        event.widget.insert(0, '')
+        event.widget.config(fg='black')
+
+def on_focusout(event, placeholder):
+    """Entry 위젯 포커스가 사라졌을 때 실행되는 이벤트 핸들러"""
+    if event.widget.get() == '':
+        event.widget.insert(0, placeholder)
+        event.widget.config(fg='grey')
+
+def on_cafe_select_and_update_treeview():
+    current_entries = tree.get_children()
+    row_number = len(current_entries) + 1  # Start from the next number
+
+    selected_indices = cafe_listbox.curselection()
+    for i in selected_indices:
+        cafe_name = cafe_listbox.get(i)
+        for cafe in cafe_info_list:
+            if cafe[0] == cafe_name:
+                cafe_url = cafe[1]
+                new_row_id = tree.insert("", tk.END, values=(row_number, logged_in_naver_id, cafe_name, cafe_url))
+                tree.selection_set(new_row_id)
+                tree.see(new_row_id)
+                row_number += 1
+
+def all_cafe_select():
+    if select_all_var.get() == 1:
+        cafe_listbox.selection_set(0, tk.END)
+    if select_all_var.get() == 0:
+        cafe_listbox.selection_clear(0, tk.END)
+
+
+# 선택된 행을 삭제하는 함수
+def delete_selected_item():
+    selected_item = tree.selection()  # 현재 선택된 행
+    if selected_item:
+        tree.delete(selected_item)
+    # 행 삭제 후 행 번호 재정렬
+    for index, item in enumerate(tree.get_children()):
+        tree.set(item, '#1', index+1)  # 첫 번째 열('#1')을 새로운 순서 번호로 업데이트
+
+# 모든 행을 삭제하는 함수
+def all_delete_selected_item():
+    for item in tree.get_children():
+        # 각 항목을 삭제합니다.
+        tree.delete(item)
+
+#게시판추출
+def get_board_list(driver, cafe_url):
+    # 해당 카페 URL로 이동
+    driver.get(cafe_url)
+    time.sleep(time2)
+
+    # 현재 페이지의 HTML 파싱
+    req = driver.page_source
+    soup = BeautifulSoup(req, 'html.parser')
+
+    # 게시판 목록 추출
+    board_menus = []
+    cafe_menu_lists = soup.select("ul.cafe-menu-list")
+    for menu_list in cafe_menu_lists:
+        list_items = menu_list.select("li")
+        for item in list_items:
+            link_text = item.select_one("a.gm-tcol-c")
+            if link_text:
+                board_menus.append(link_text.get_text(strip=True))  
+    return board_menus
+
+board_list = []  # 전역 변수로 현재 게시판 목록을 저장
+def on_cafe_select():
+    global board_list
+    # 현재 선택된 행의 ID를 가져옵니다.
+    selected_item = tree.focus()
+    
+    # 선택된 행의 데이터를 가져옵니다.
+    item_data = tree.item(selected_item, 'values')
+    
+    # 카페 URL을 가져옵니다.
+    cafe_url = item_data[3]  # 4번째 열에 URL이 있다고 가정
+
+    # 게시판 목록을 가져옵니다.
+    board_list = get_board_list(global_driver, cafe_url)
+
+    # 콤보박스 업데이트
+    board_combobox['values'] = board_list
+
+
+def filter_and_display_boards(search_term):
+    global board_list  # 전역 변수 사용 선언
+
+    # 검색어가 비어있는 경우 전체 게시판 목록을 표시
+    if not search_term.strip():
+        board_combobox['values'] = board_list
+    else:
+        # 검색어에 해당하는 게시판만 필터링하여 표시
+        filtered_boards = [board for board in board_list if search_term.lower() in board.lower()]
+        board_combobox['values'] = filtered_boards
+
+def add_placeholder_board(entry, placeholder, callback=None):
+    """Entry 위젯에 플레이스홀더와 선택적 콜백 함수를 추가하는 함수"""
+    entry.insert(0, placeholder)
+    entry.config(fg='grey')
+    entry.bind("<FocusIn>", lambda event: on_entry_click(event, placeholder))
+    entry.bind("<FocusOut>", lambda event: on_focusout(event, placeholder))
+
+    if callback:
+        # 사용자 입력에 반응하여 콜백 함수 호출
+        entry.bind("<KeyRelease>", lambda event: callback())
+
+def on_entry_click(event, placeholder):
+    """Entry 위젯 클릭 시 실행되는 이벤트 핸들러"""
+    if event.widget.get() == placeholder:
+        event.widget.delete(0, "end")  # 기존 플레이스홀더 텍스트 삭제
+        event.widget.config(fg='black')  # 텍스트 색상을 검정색으로 변경
+
+def on_focusout(event, placeholder):
+    """Entry 위젯 포커스가 사라졌을 때 실행되는 이벤트 핸들러"""
+    if event.widget.get() == '':
+        event.widget.insert(0, placeholder)  # 플레이스홀더 텍스트 재삽입
+        event.widget.config(fg='grey')  # 텍스트 색상을 회색으로 변경
+
+
+# 글, 댓글 게시판 업데이트
+def update_treeview_for_selected_item(action):
+    selected_board = board_combobox.get()
+    selected_items = tree.selection()
+
+    if selected_items:  # 선택된 항목이 있는지 확인
+        item_to_update = selected_items[0]
+        current_values = list(tree.item(item_to_update, 'values'))
+
+        # 현재 값의 리스트가 7개 미만일 경우, 빈 값으로 채웁니다.
+        while len(current_values) < 8:
+            current_values.append("")
+
+        if action == "review":
+            
+            current_values[4] = selected_board
+            
+        # 트리뷰 항목을 새로운 값으로 업데이트합니다.
+        tree.item(item_to_update, values=current_values)
+
+def handle_review_button_click():
+    update_treeview_for_selected_item("review")
+
+def add_columns_with_spinboxes(tree):
+    columns = ("번호", "아이디", "카페명", "주소", "추출게시판", "페이지수", "작업")
+    tree['columns'] = columns
+    for col in columns:
+        tree.heading(col, text=col)
+        if col in ("카페명","추출게시판", "페이지수"):
+            tree.column(col, width=50)
+        else:
+            tree.column(col, width=30)
+        
+    # Treeview 위젯의 특정 셀 클릭 시 실행될 콜백 함수를 바인딩
+    tree.bind('<ButtonRelease-1>', lambda event: on_treeview_click(event, tree))
+
+
+def on_treeview_click(event, tree):
+    # Here you'll pop up a spinbox when a cell in columns 6-9 is clicked
+    region = tree.identify("region", event.x, event.y)
+    if region == "cell":
+        column = tree.identify_column(event.x)
+        row = tree.identify_row(event.y)
+        if column in ('#6'):  # Target the columns with spinboxes
+            spinbox_popup(event.x_root, event.y_root, tree, row, column)
+
+def spinbox_popup(x, y, tree, row, column):
+    # Create a toplevel window
+    popup = tk.Toplevel()
+    popup.wm_overrideredirect(True)
+    popup.geometry(f"+{x}+{y}")
+
+    # Create Spinbox and set focus
+    spinbox = tk.Spinbox(popup, from_=0, to=99999, width=5)
+    spinbox.focus_force()
+   
+    # Get the current value of the cell and place it in the Spinbox
+    current_value = tree.set(row, column)
+    spinbox.delete(0, tk.END)
+    spinbox.insert(0, current_value)
+
+    def on_spinbox_enter(event=None):
+        # Update Treeview cell value
+        tree.set(row, column, spinbox.get())
+        popup.destroy()
+
+    spinbox.bind('<Return>', on_spinbox_enter)
+    spinbox.bind('<FocusOut>', on_spinbox_enter)
+    spinbox.pack()
+
+def update_all_rows_with_entry_values():
+    # 각 열에 대한 입력 값 가져오기
+    page_count = page_count_entry.get()
+    
+    # 입력값 검증 (예시로 숫자인지 확인, 실제 사용시 더 세밀한 검증 필요)
+    if not all(value.isdigit() for value in [page_count]):
+        messagebox.showerror("입력 오류", "모든 값은 숫자여야 합니다.")  # 에러 메시지 출력 예시
+        return
+
+    # 트리뷰의 모든 행을 순회하면서 값을 업데이트
+    for item in tree.get_children():
+        tree.set(item, "#6", page_count)
+        
+
+def on_entry_click(event, placeholder):
+    """Entry 위젯 클릭 시 실행되는 이벤트 핸들러"""
+    if event.widget.get() == placeholder:
+        event.widget.delete(0, "end")  # 내용 삭제
+        event.widget.insert(0, '')  # 빈 문자열 삽입
+        event.widget.config(fg='black')  # 글씨 색상 변경
+
+def on_focusout(event, placeholder):
+    """Entry 위젯 포커스가 사라졌을 때 실행되는 이벤트 핸들러"""
+    if event.widget.get() == '':
+        event.widget.insert(0, placeholder)
+        event.widget.config(fg='grey')
+
+def add_placeholder_to(entry, placeholder):
+    """Entry 위젯에 플레이스홀더를 추가하는 함수"""
+    entry.insert(0, placeholder)
+    entry.config(fg='grey')
+    entry.bind("<FocusIn>", lambda event, placeholder=placeholder: on_entry_click(event, placeholder))
+    entry.bind("<FocusOut>", lambda event, placeholder=placeholder: on_focusout(event, placeholder))
+
+def save_treeview_data():
+    """트리뷰 데이터를 파일로 저장합니다."""
+    data = [(tree.item(item)['values']) for item in tree.get_children()]
+    filepath = filedialog.asksaveasfilename(defaultextension=".pkl", filetypes=[("Pickle files", "*.pkl")])
+    if filepath:
+        with open(filepath, 'wb') as outfile:
+            pickle.dump(data, outfile)
+        print_to_textbox(f"데이터가 저장되었습니다: {filepath}")
+
+def load_treeview_data():
+    """파일로부터 트리뷰 데이터를 불러와 트리뷰에 표시합니다."""
+    filepath = filedialog.askopenfilename(filetypes=[("Pickle files", "*.pkl")])
+    if filepath:
+        with open(filepath, 'rb') as infile:
+            data = pickle.load(infile)
+        for item in data:
+            tree.insert("", tk.END, values=item)
+        print_to_textbox(f"데이터가 불러와졌습니다: {filepath}")
+
+
+#실행버튼이후작업
+def find_password_for_id(id, file_path):
+    with open(file_path, 'r', encoding='utf-8') as file:
+        for line in file:
+            parts = line.strip().split(',')
+            if parts[0] == id:
+                return parts[1]  # ID에 해당하는 비밀번호 반환
+    return None  # 비밀번호를 찾지 못한 경우
+
+
+def get_selected_id_from_treeview():
+    selected_item = tree.selection()[0]  # 첫 번째 선택된 항목
+    id_value = tree.item(selected_item, 'values')[0]  # 'values'의 첫 번째 요소가 ID라고 가정
+    return id_value
+   
+def print_to_textbox(message):
+    text_area.insert(tk.END, message + "\n")
+    text_area.see(tk.END)  # 스크롤 자동 이동
+   
+def update_treeview_selection(row_id):
+    """Update the treeview selection and ensure the row is visible."""
+    if not tree.exists(row_id):  # Check if the row_id still exists to avoid errors
+        return
+    tree.selection_set(row_id)
+    tree.see(row_id)
+
+
+# 주요 작업을 수행하는 함수
+def run_main_in_thread(id, pw):
+    
+    empty_boards_found  = False
+    
+    timestamp = datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
+    file_name = f"{timestamp}.xlsx"
+
+    # 비어 있는 게시판이 있는지 확인
+    for row_id in tree.get_children():
+        row_data = tree.item(row_id, 'values')
+        comment_board = row_data[4]
+        if not comment_board:
+            empty_boards_found = True
+            break
+    if empty_boards_found:
+        # 비어 있는 게시판이 있는 경우 사용자에게 확인 요청
+        response = messagebox.askokcancel("확인 요청", "추출게시판 정보가 비어 있으면 건너뜁니다. 계속하시겠습니까?")
+        if response:
+            # 사용자가 '확인'을 선택한 경우, 비어 있는 게시판이 있는 행에 '건너뜀' 설정
+            for row_id in tree.get_children():
+                row_data = tree.item(row_id, 'values')
+                comment_board = row_data[4]
+                if not comment_board:
+                    tree.set(row_id, '#7', '건너뜀')  # 비어 있는 게시판이 있는 행에만 '건너뜀' 설정
+        else:
+            # 사용자가 '취소'를 선택한 경우, 작업을 중지합니다.
+            return
+    # If no empty fields are found, proceed with running the main function in a thread
+    thread = threading.Thread(target=remain, args=(id, pw, file_name))
+    thread.start()
+
+
+def remain(id, pw, file_name):
+    global global_driver
+    global file_name_entry
+    
+    cafe_status = {}
+    # 초기화 및 '진행중' 상태 설정
+    for row_id in tree.get_children():
+        
+        row_data = tree.item(row_id, 'values')
+        # 글게시판과 댓글게시판 값이 빈칸인지 확인
+        review_menu = row_data[4]
+        if not review_menu:
+            tree.set(row_id, column='작업', value='건너뜀')
+            continue  # 이 행의 처리를 건너뜁니다.
+        
+        _, cafe_id, cafe_name, cafe_url, review_menu, page_count, 작업, *_ = row_data
+        
+        if global_driver:
+            global_driver.quit()
+            
+        global_driver = setup_chrome_driver()
+        # Find password and log in
+        login_file_path_value = login_file_path.get()
+        password = find_password_for_id(cafe_id, login_file_path_value)
+        login(global_driver, cafe_id, password)
+        
+        # 카페 방문
+        root.after(0, update_treeview_selection, row_id)
+        tree.set(row_id, column='작업', value='진행중')
+
+        global_driver.get(cafe_url)
+
+        # 게시판찾고 클릭
+        req = global_driver.page_source  
+        soup = BeautifulSoup(req, 'html.parser')
+        cafe_menu_lists = soup.select("ul.cafe-menu-list > li > a")
+        for menu in cafe_menu_lists:
+            if review_menu in menu.text:
+                review_menu_link = menu['href']
+                global_driver.get(cafe_url + review_menu_link)
+                break
+
+        time.sleep(1)  # 페이지 로드 대기 후 나머지 코드 실행
+
+        total_pages = int(page_count)
+        current_page = 1  # 현재 페이지 번호
+        global_driver.switch_to.frame("cafe_main")
+        is_duplicate = False  # 중복 플래그 초기화
+        post_counter = 0
+
+        while current_page <= total_pages:
+            posts = global_driver.find_elements(By.CSS_SELECTOR, "#main-area > div:nth-child(4) > table > tbody > tr > td.td_article > div.board-list > div > a.article")
+            for post in posts:
+                post_link = post.get_attribute('href')
+                # 새 탭에서 게시글 링크를 엽니다.
+                global_driver.execute_script("window.open(arguments[0]);", post_link)
+                
+                # 새로 열린 탭으로 전환합니다.
+                global_driver.switch_to.window(global_driver.window_handles[1])
+                
+                time.sleep(2)
+                global_driver.switch_to.frame("cafe_main")
+                current_url = global_driver.current_url
+
+                req = global_driver.page_source  
+                soup = BeautifulSoup(req, 'html.parser')
+                time.sleep(0.5)                
+                # 게시글 제목 추출 및 처리
+                title_raw = soup.select_one('.title_area .title_text').get_text(strip=True)
+                title = re.sub(r'[^\w\s]', '', title_raw)  # 비문자-숫자 및 공백을 제외한 모든 문자 제거
+                
+                # 게시글 내용 추출
+                content_element = soup.select_one('.content.CafeViewer .se-section-text')
+                content = content_element.get_text(strip=True) if content_element else ''  # 내용이 없는 경우 빈 문자열로 처리
+                content = re.sub(r'[^\w\s]', '', content)  # 비문자-숫자 및 공백을 제외한 모든 문자 제거
+
+                view_count_raw = soup.select_one('.count').get_text(strip=True)
+                view_count = int(re.findall(r'\d+', view_count_raw)[0]) if re.findall(r'\d+', view_count_raw) else 0
+                time.sleep(0.5)                
+                global_driver.close()
+                time.sleep(0.5)
+                global_driver.switch_to.window(global_driver.window_handles[0])
+                time.sleep(0.5)
+                if 'df_combined' not in locals():  # Check if df_combined is not already defined
+                    df_combined = pd.DataFrame(columns=['카페명','글주소', '제목', '내용', '조회수'])
+
+                # if not df_combined.empty:  # DataFrame이 비어있지 않은 경우에만 중복 검사 실행
+                #     # 현재 제목과 내용을 기준으로 중복 검사
+                #     is_duplicate = df_combined.apply(
+                #         lambda row: row['제목'] == (title_list[0] if title_list else '') and 
+                #                     row['내용'] == ' '.join(content_list), axis=1).any()
+                if not df_combined.empty:
+                    is_duplicate = df_combined.apply(lambda row: row['제목'] == title and row['내용'] == content, axis=1).any()
+
+
+                # 중복되지 않는 경우에만 추가 및 저장
+                if not is_duplicate:
+                    next_available_row = df_combined['글주소'].last_valid_index() + 1 if df_combined['글주소'].last_valid_index() is not None else 0
+                    df_combined.at[next_available_row, '카페명'] = cafe_name
+                    df_combined.at[next_available_row, '글주소'] = current_url
+                    df_combined.at[next_available_row, '제목'] = title
+                    df_combined.at[next_available_row, '내용'] = content
+                    df_combined.at[next_available_row, '조회수'] = view_count
+                    #df_combined = df_combined.append({'글주소': current_url, '제목': title, '내용': content, '조회수': view_count}, ignore_index=True)
+
+                    # 변경사항을 엑셀 파일에 저장
+                    df_combined.to_excel(file_name, index=False)
+                    
+                post_counter += 1
+                print_to_textbox(f"글 추출 현황: 총 {post_counter}개의 글을 추출했습니다.")
+
+
+                time.sleep(1)
+                global_driver.switch_to.frame("cafe_main")
+            
+            # 페이지 이동 로직
+            if current_page % 10 == 0 and current_page < total_pages:
+                next_button = global_driver.find_element(By.CSS_SELECTOR, '#main-area > div.prev-next > a.pgR')
+                next_button.click()
+            elif current_page < total_pages:
+                if current_page <= 10:
+                    next_page_index = (current_page % 10) + 1
+                else:
+                    next_page_index = (current_page % 10) + 2
+                next_page_selector = f'#main-area > div.prev-next > a:nth-child({next_page_index + 1})'  # +1 because nth-child(2) is the first page
+                next_page_button = global_driver.find_element(By.CSS_SELECTOR, next_page_selector)
+                next_page_button.click()  # Directly click on the identified button
+            current_page += 1
+            time.sleep(time1)
+
+        tree.set(row_id, column='작업', value='완료')
+    
+    print_to_textbox("게시글 추출 작업이 완료되었습니다.")
+    global_driver.quit()
+    
+    
+def main():
+    global login_file_path, account_listbox, naver_id, naver_pw
+    global review_file_path, search_cafe_var, select_all_var, search_board_var
+    global text_area, cafe_listbox, tree, board_combobox, cafe_id, password
+    global root, page_count_entry   # Include file_name_entry here
+    
+    # Tkinter 창 설정
+    root = tk.Tk()
+    root.title("카페 게시글 추출기")
+    root.geometry("900x750")  # 전체 창 크기 조정
+
+    # Now create StringVar objects
+    user_id = tk.StringVar()
+    user_pw = tk.StringVar()
+    login_file_path = tk.StringVar()
+
+    # PanedWindow 설정
+    paned_window = tk.PanedWindow(root, orient=tk.HORIZONTAL)
+    paned_window.pack(fill=tk.BOTH, expand=True)
+
+    # 왼쪽 프레임 설정
+    frame_left = tk.Frame(paned_window)
+    paned_window.add(frame_left, width=200)
+
+    # 오른쪽 프레임 설정
+    frame_right = tk.Frame(paned_window)
+    paned_window.add(frame_right, width=20)
+
+
+    login_frame = ttk.LabelFrame(frame_left, text="로그인 정보")
+    login_frame.pack(fill=tk.X, padx=10, pady=5)
+
+    # 왼쪽 프레임 내용 설정 및 buttons_frame 정의
+    file_button = tk.Button(login_frame, text="파일", command=read_login_file, width =7)
+    file_button.pack()
+
+    account_listbox = tk.Listbox(login_frame)
+    account_listbox.pack(pady=5)
+
+    # 체크박스 상태를 저장할 변수
+    tethering_var = tk.IntVar()
+
+    # 로그인 버튼에 대한 클릭 이벤트 연결
+    login_button = tk.Button(login_frame, text="로그인", command=on_login_button_click, width =7)
+    login_button.pack(pady=5)
+
+    tk.Label(frame_left).pack()
+
+
+    cafe_frame = ttk.LabelFrame(frame_left, text="카페 셋팅")
+    cafe_frame.pack(fill=tk.BOTH,padx=10, pady=5)
+
+    search_cafe_var = tk.StringVar()
+    #search_cafe_var.trace_add("write", lambda *args: filter_and_display_cafes(search_cafe_var.get()))
+    search_cafe_entry = tk.Entry(cafe_frame, textvariable=search_cafe_var)
+    search_cafe_entry.pack()
+
+    # 플레이스홀더 추가 및 검색 함수 연결
+    add_placeholder_cafe(search_cafe_entry, "카페 검색", lambda: filter_and_display_cafes(search_cafe_var.get()))
+
+    # Create the container frame
+    serial_frame = tk.Frame(cafe_frame)
+    serial_frame.pack(fill="both")
+
+    # Create the Listbox within the container frame
+    cafe_listbox = tk.Listbox(serial_frame)
+    cafe_listbox.pack(side="left", fill="both", expand=True)
+
+    # Create the Scrollbar and attach it to the container frame
+    serial_scrollbar = tk.Scrollbar(serial_frame, orient="vertical", command=cafe_listbox.yview)
+    serial_scrollbar.pack(side="right", fill="y")
+
+    # Configure the Listbox to use the Scrollbar
+    cafe_listbox.config(yscrollcommand=serial_scrollbar.set)
+
+    select_cafe_button = tk.Button(cafe_frame, text="카페 선택", command=on_cafe_select_and_update_treeview, width = 10)
+    select_cafe_button.pack(pady=5)
+
+    select_all_var = tk.IntVar(value=0)
+    select_all_checkbox = tk.Checkbutton(cafe_frame, text="전체 선택", variable=select_all_var, onvalue=1, offvalue=0, command=all_cafe_select)
+    select_all_checkbox.pack()
+
+    tk.Label(cafe_frame).pack()
+
+    
+    # 검색 입력 필드와 변수 바인딩
+    search_board_var = tk.StringVar()
+    #search_board_var.trace_add("write", lambda *args: filter_and_display_boards(search_board_var.get()))
+    search_board_entry = tk.Entry(cafe_frame, textvariable=search_board_var)
+    search_board_entry.pack()
+
+    # 플레이스홀더 추가 및 검색 함수 연결
+    add_placeholder_board(search_board_entry, "게시판 검색", lambda: filter_and_display_boards(search_board_var.get()))
+
+    board_combobox = ttk.Combobox(cafe_frame, height = 10)
+    board_combobox.pack()
+
+    # 버튼 배치를 위한 buttons_frame 정의
+    buttons_frame = tk.Frame(cafe_frame)
+    buttons_frame.pack()
+    post_button = tk.Button(buttons_frame, text="추출 게시판 선택", command=handle_review_button_click)
+    post_button.pack(side="left", pady=10)
+
+    
+    # Tkinter의 버튼 클릭 이벤트를 수정합니다.
+    action_button = tk.Button(frame_left, text="실행", command=lambda: run_main_in_thread(user_id.get(), user_pw.get()),height=2)
+    action_button.pack(side=tk.TOP, fill=tk.X, expand=True)
+
+    data_frame = ttk.LabelFrame(frame_right, text="작업리스트")
+    data_frame.pack(fill=tk.BOTH,padx=10, pady=15,expand=True)
+
+    tree_frame = tk.Frame(data_frame, height=25)  # 여기서 height 값을 설정
+    tree_frame.pack_propagate(False)  # Frame 내부 위젯의 크기 변화를 Frame 크기에 영향을 미치지 않도록 설정
+    tree_frame.pack(fill="both", expand=True)
+
+    # Create the Treeview within the tree_frame
+    tree = ttk.Treeview(tree_frame, show='headings', height=15)
+    add_columns_with_spinboxes(tree)  # Assuming this function sets up the treeview columns
+    tree.pack(side='left', fill='both', expand=True, padx=5)
+
+    # Create the Scrollbar within the tree_frame
+    scrollbar = ttk.Scrollbar(tree_frame, orient='vertical', command=tree.yview)
+    scrollbar.pack(side='right', fill='y')
+
+    # Link the scrollbar to the treeview
+    tree.config(yscrollcommand=scrollbar.set)
+
+    tk.Label(frame_right).pack()
+
+    # Create the container frame
+    option_frame = tk.Frame(data_frame)
+    option_frame.pack()
+
+    menu_button = tk.Button(option_frame, text="게시판 찾기", command=on_cafe_select)
+    menu_button.pack(side="left", padx=30)
+
+
+    page_count_entry = tk.Entry(option_frame, width=7)
+    page_count_entry.pack(side="left", padx=5)
+    
+    add_placeholder_to(page_count_entry, "페이지수")
+
+    update_all_button = tk.Button(option_frame, text="전체 수정", command=update_all_rows_with_entry_values)
+    update_all_button.pack(side="left", padx=10)
+
+    # 삭제 버튼 옆에 저장 버튼 및 불러오기 버튼 추가
+    save_button = tk.Button(option_frame, text="데이터 저장", command=save_treeview_data)
+    save_button.pack(side="right", padx=5)
+
+    load_button = tk.Button(option_frame, text="데이터 불러오기", command=load_treeview_data)
+    load_button.pack(side="right", padx=5)
+
+    # 삭제 및 전체삭제 버튼 사이의 공백을 위한 빈 Frame 생성
+    spacer_frame_1 = tk.Frame(option_frame, width=20, height=10)
+    spacer_frame_1.pack(side="right", padx=5, fill="both", expand=True)
+
+    # 삭제 버튼 생성 및 이벤트 연결
+    all_delete_button = tk.Button(option_frame, text="전체삭제", command=all_delete_selected_item)
+    all_delete_button.pack(side="right")
+
+    # 삭제 버튼 생성 및 이벤트 연결
+    delete_button = tk.Button(option_frame, text="삭제", command=delete_selected_item)
+    delete_button.pack(side="right", padx=5)
+    # 삭제 및 전체삭제 버튼 사이의 공백을 위한 빈 Frame 생성
+    spacer_frame_1 = tk.Frame(option_frame, width=20, height=10)
+    spacer_frame_1.pack(side="right", padx=5, fill="both", expand=True)
+
+
+
+    text_frame = ttk.LabelFrame(frame_right, text="로그")
+    text_frame.pack(fill=tk.BOTH, padx=10, pady=10,expand=True)
+
+
+    # 텍스트 창 추가
+    text_area = tk.Text(text_frame, height=5)  # 텍스트 창의 높이 설정
+    text_area.pack(fill=tk.BOTH, padx=10, pady=10, expand=True)
+    tk.Label(frame_right).pack()
+
+    root.mainloop()
+
+
