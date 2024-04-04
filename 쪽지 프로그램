@@ -1,0 +1,358 @@
+import tkinter as tk
+from tkinter import ttk
+from tkinter import filedialog, messagebox
+from selenium import webdriver
+from selenium.webdriver.common.by import By
+from selenium.webdriver.common.action_chains import ActionChains
+from anticaptchaofficial.imagecaptcha import *
+from selenium.webdriver.common.keys import Keys
+from selenium.webdriver.support.ui import WebDriverWait
+from selenium.webdriver.support import expected_conditions as EC
+from selenium.common.exceptions import NoSuchElementException, TimeoutException
+import os
+import random
+import pyperclip
+import time
+import sys
+import threading 
+
+def main():
+    driver = None
+    account_list = []
+    wait_time = random.uniform(0.5, 1)
+    time1 = random.uniform(0.8, 1.2)
+    time2 = random.uniform(1.2, 1.5)
+
+    # Initialize GUI window
+    root = tk.Tk()
+    root.title("네이버 쪽지 발송 프로그램")
+    root.geometry("500x600")
+
+    # StringVars for paths
+    login_file_path = tk.StringVar(root)
+    recipient_file_path = tk.StringVar(root)
+    note_folder_path = tk.StringVar(root)
+    tethering_var = tk.IntVar(root)
+    quotes_file_path = tk.StringVar(root)
+    max_recipients_var = tk.IntVar(value=50)  # Default value
+    max_recipients_options = [5,10, 15, 20, 25, 30, 35, 40, 45,50]  # Example options
+
+
+    def update_progress(message):
+        """
+        작업 진행 상황을 GUI에 업데이트하는 함수입니다.
+        """
+        progress_text.insert(tk.END, message + "\n")  # 메시지 추가
+        progress_text.see(tk.END)  # 스크롤하여 가장 최근 메시지 보이기
+        root.update_idletasks()  # GUI 업데이트
+
+    def toggle_airplane_mode():
+        
+        # Connect to the ADB server
+        adb = AdbClient(host="127.0.0.1", port=5037)
+
+        devices = adb.devices()
+        if len(devices) == 0:
+            print("No device attached")
+            quit()
+
+        device = devices[0]
+        # Turn on airplane mode
+        device.shell("settings put global airplane_mode_on 1")
+        device.shell("am broadcast -a android.intent.action.AIRPLANE_MODE --ez state true")
+        time.sleep(5)
+
+        device.shell("settings put global airplane_mode_on 0")
+        device.shell("am broadcast -a android.intent.action.AIRPLANE_MODE --ez state false")
+        time.sleep(20)
+
+    # Function to setup the Chrome driver
+    def setup_chrome_driver():
+        chrome_driver_path = "C:\Program Files\Google\Chrome\Application\chrome.exe"
+        options = webdriver.ChromeOptions()
+        options.add_argument('user-agent=Mozilla/5.0 (Windows NT 6.3; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/63.0.3239.132 Safari/537.36')
+
+        driver = webdriver.Chrome()
+        return driver
+
+    def login(driver, my_id, my_pw):
+        try:
+            login_url = "https://nid.naver.com/nidlogin.login"
+            driver.get(login_url)
+            time.sleep(1)
+            # "switch_btn" 요소를 찾고, 내부의 "span" 요소의 텍스트가 "off"인지 확인합니다.
+            switch_btn = driver.find_element(By.CSS_SELECTOR, ".switch_btn")
+            switch_status = driver.find_element(By.CSS_SELECTOR, ".switch_btn .blind").text
+            # switch_status가 "off"일 경우에만 클릭합니다.
+            if switch_status.lower() == "on":
+                switch_btn.click()
+            time.sleep(0.5)
+            id_selector = "#id"
+            pw_selector = "#pw"
+            login_btn_selector = "#log\\.login"
+            id_input = driver.find_element(By.CSS_SELECTOR, id_selector)
+            pw_input = driver.find_element(By.CSS_SELECTOR, pw_selector)
+            login_btn = driver.find_element(By.CSS_SELECTOR, login_btn_selector)
+            id_input.click()
+            pyperclip.copy(my_id)
+            ActionChains(driver).key_down(Keys.CONTROL).send_keys("v").key_up(Keys.CONTROL).perform()
+            pw_input.click()
+            pyperclip.copy(my_pw)
+            ActionChains(driver).key_down(Keys.CONTROL).send_keys("v").key_up(Keys.CONTROL).perform()
+            login_btn.click()
+            time.sleep(1)
+            try:
+                dont_save_button = driver.find_element(By.ID, "new.dontsave")
+                dont_save_button.click()
+                time.sleep(0.5)  # Wait for 1 second to let the page react to the button click.
+            except NoSuchElementException:
+                pass
+            driver.find_element(By.CSS_SELECTOR, ".MyView-module__btn_logout___bsTOJ")
+            return True
+        except Exception as e:
+            return False
+        
+    def read_login_file():
+        global account_list
+        file_path = filedialog.askopenfilename(filetypes=[("Text files", "*.txt")])
+        if file_path:
+            login_file_path.set(file_path)  # Update the path label
+            with open(file_path, 'r', encoding='utf-8') as file:
+                account_list = [line.strip().split(',') for line in file if ',' in line]
+
+    # Function to read recipient file
+    def read_recipient_file():
+        file_path = filedialog.askopenfilename(title="보낼 사람 파일 선택", filetypes=[("Text files", "*.txt")])
+        if file_path:
+            recipient_file_path.set(file_path)
+
+    # Function to select note folder
+    def select_note_folder():
+        folder_path = filedialog.askdirectory(title="쪽지 내용 폴더 선택")
+        if folder_path:
+            note_folder_path.set(folder_path)
+
+    # Function to read recipient IDs
+    def read_recipient_ids(file_path):
+        with open(file_path, 'r', encoding='utf-8') as file:
+            recipient_ids = [line.strip() for line in file if line.strip()]
+        return recipient_ids
+
+    def select_quotes_file():
+        file_path = filedialog.askopenfilename(title="명언 파일 선택", filetypes=[("Text files", "*.txt")])
+        if file_path:
+            quotes_file_path.set(file_path)
+
+    # Function to randomly select a note content from folder
+    def read_random_note_content_from_folder(folder_path):
+        note_files = [os.path.join(folder_path, f) for f in os.listdir(folder_path) if f.endswith('.txt')]
+        if not note_files:
+            raise FileNotFoundError("No text files found in the folder.")
+        selected_file_path = random.choice(note_files)
+        with open(selected_file_path, 'r', encoding='utf-8') as file:
+            return file.read()
+
+    def read_random_quote(file_path):
+        with open(file_path, 'r', encoding='utf-8') as file:
+            quotes = file.readlines()
+        return random.choice(quotes).strip()
+
+    def read_combined_note_content(folder_path, quotes_file_path):
+        note_content = read_random_note_content_from_folder(folder_path)
+        #if quotes_file_path:
+        if quotes_file_path and os.path.exists(quotes_file_path):
+            quote = read_random_quote(quotes_file_path)
+            note_content += "\n\n" + quote  # Append the quote to the note content
+        return note_content
+
+        
+    # 캡차 해결 함수
+    def Call_Back_Captcha(driver, solver) -> str:
+        captcha_image_xpath = "//*[@id='note_captcha']/div/div[1]/div/img"
+        captcha_image_element = driver.find_element(By.XPATH, captcha_image_xpath)
+        captcha_image_element.screenshot('captcha.png')
+        Captcha_Text = solver.solve_and_return_solution("captcha.png")
+        return Captcha_Text
+
+    # Captcha 설정
+    solver = imagecaptcha()
+    solver.set_verbose(0)
+    solver.set_key("08cf045a24d9010a720795c57a225b39")
+
+    
+    def mail(driver, recipient_ids, note_files_folder, start_index, quotes_file_path, max_recipients):
+        sent_count = 0  # 현재 계정으로 보낸 메시지 수
+        fail_flag = False  # Initialize fail_flag at the start of the function
+
+        for idx, recipient_id in enumerate(recipient_ids[start_index:], start=start_index):
+            if sent_count >= max_recipients:
+                break  # Stop if max recipients per account is reached
+            recipient_id = recipient_ids[idx]
+            random_note_content = read_combined_note_content(note_files_folder, quotes_file_path.get())
+            
+            # 받는사람 입력 창 찾기 및 클릭
+            recipient_input_selector = "#who"
+            recipient_input = driver.find_element(By.CSS_SELECTOR, recipient_input_selector)
+            recipient_input.click()  # 받는사람 입력 창 클릭
+            time.sleep(wait_time)
+            recipient_input.clear()
+            time.sleep(wait_time)
+            recipient_input.send_keys(recipient_id)
+            time.sleep(wait_time)
+
+            # 쪽지 내용 입력
+            note_input_selector = "#writeNote"
+            note_input = driver.find_element(By.CSS_SELECTOR, note_input_selector)
+            note_input.click()
+            time.sleep(wait_time)
+            note_input.clear()
+            time.sleep(wait_time)
+            note_input.send_keys(random_note_content)
+            time.sleep(wait_time)
+            send_button = driver.find_element(By.PARTIAL_LINK_TEXT, "보내기")
+            send_button.click()
+            time.sleep(wait_time)
+            try:
+                # 알림 대기
+                alert = WebDriverWait(driver, 2).until(EC.alert_is_present())
+                alert_text = alert.text
+
+                # 성공/실패 메시지 처리
+                if "쪽지를 성공적으로 보냈습니다." in alert_text:
+                    update_progress(f"성공: {sent_count + 1}번째 쪽지발송 ({recipient_id})")
+                    alert.accept()
+                    time.sleep(wait_time)
+                    sent_count += 1
+                elif "하루에 보낼 수 있는 쪽지 50개를 모두 발송하셨습니다." in alert_text:
+                    update_progress(f"최대 발송 개수를 완료해서 계정을 변경합니다.")
+                    alert.accept()
+                    time.sleep(wait_time)
+                    fail_flag = True  # 발송 실패 플래그 설정
+                    break  # 발송 실패 시 반복문 탈출
+                elif "아이디가 존재하지 않습니다." in alert_text:
+                    update_progress(f"실패: 아이디({recipient_id}, 존재하지 않는 아이디).")
+                    alert.accept()
+                    time.sleep(wait_time)
+                    continue  # 다음 수신자로 넘어감    
+            except TimeoutException:
+                while True:
+                    update_progress("캡차 해제 시도중.")
+                    captcha_solution = Call_Back_Captcha(driver, solver)
+                    captcha_input = driver.find_element(By.ID, 'inputCaptcha')  # By.ID를 사용하여 요소 찾기
+                    captcha_input.clear()
+                    captcha_input.send_keys(captcha_solution)
+                            
+                    agree_button_xpath = "//*[@id='note_captcha']/div/div[2]/a[1]"
+                    agree_button = driver.find_element(By.XPATH, agree_button_xpath)
+                    agree_button.click()
+                    time.sleep(1)
+                    try:
+                        # '입력된 문자가 올바르지 않습니다' 메시지 확인
+                        captcha_error_msg = WebDriverWait(driver, 1).until(
+                            EC.presence_of_element_located((By.ID, "desc_captcha"))
+                        ).text
+                        if '입력된 문자가 올바르지 않습니다. 다시 입력해 주세요.' in captcha_error_msg:
+                            continue  # 캡챠를 잘못 입력한 경우, 반복문의 다음 반복으로 넘어가 다시 시도
+                    except Exception as e:
+                        update_progress(f"성공: {sent_count + 1}번째 쪽지발송 ({recipient_id})")
+                        sent_count += 1
+                        # 지정된 시간(1초) 동안 캡챠 오류 메시지가 나타나지 않은 경우
+                        time.sleep(1)  # 잠시 대기 후 다음 단계로 이동
+                        break   
+
+        return start_index + sent_count, fail_flag
+
+    def action():
+        global driver
+        global account_list
+        recipient_ids = read_recipient_ids(recipient_file_path.get())
+        note_files_folder = note_folder_path.get()
+        max_recipients = max_recipients_var.get()  # Get the current value selected in the dropdown
+
+        start_index = 0  # 초기 start_index 설정
+
+        for account in account_list:
+            if start_index >= len(recipient_ids):
+                break
+
+            if tethering_var.get() == 1:
+                toggle_airplane_mode()
+
+            driver = setup_chrome_driver()
+            if login(driver, account[0], account[1]):
+                driver.get("https://note.naver.com/write")
+                time.sleep(1)
+                start_index, fail_flag = mail(driver, recipient_ids, note_files_folder, start_index, quotes_file_path,max_recipients)
+                
+                if fail_flag:
+                    # 한 계정에서 메시지 전송 한계에 도달했을 때의 알림
+                    update_progress(f"계정 ({account[0]}) : 메시지 발송 완료했습니다.")
+                    continue  # 다음 계정으로 넘어가기
+                
+                driver.quit()  # 현재 드라이버 종료
+            else:
+                update_progress(f"로그인 실패 ({account[0]}), 다음 계정으로 이동.")
+                driver.quit()  # Close the browser if login failed
+                continue  # Skip to the next account
+
+        update_progress("작업 완료했습니다.")
+        driver.quit()
+
+    def start_thread():
+        # main 함수를 별도의 스레드에서 실행하기 위한 함수
+        main_thread = threading.Thread(target=action)
+        main_thread.start()  # 스레드 시작
+
+    # GUI 구성 요소
+    login_file_btn = tk.Button(root, text="발신 로그인 선택", command=read_login_file)
+    login_file_btn.pack()
+    login_file_label = tk.Label(root, textvariable=login_file_path)
+    login_file_label.pack()
+
+    recipient_file_btn = tk.Button(root, text="수신 아이디 선택", command=read_recipient_file)
+    recipient_file_btn.pack()
+    recipient_file_label = tk.Label(root, textvariable=recipient_file_path)
+    recipient_file_label.pack()
+
+    quotes_file_btn = tk.Button(root, text="명언 파일 선택", command=select_quotes_file)
+    quotes_file_btn.pack()
+    quotes_file_label = tk.Label(root, textvariable=quotes_file_path)
+    quotes_file_label.pack()
+
+    note_folder_btn = tk.Button(root, text="쪽지 내용 폴더 선택", command=select_note_folder)
+    note_folder_btn.pack()
+    note_folder_path_label = tk.Label(root, textvariable=note_folder_path)
+    note_folder_path_label.pack()
+
+
+    def update_max_recipients(event):
+        """Update the maximum recipients based on the user selection."""
+        selected_value = max_recipients_dropdown.get()
+        max_recipients_var.set(int(selected_value))
+
+
+    # Create a Label
+    max_recipients_label = tk.Label(root, text="아이디당 발송 개수")
+    max_recipients_label.pack()
+
+    # Create a Combobox
+    max_recipients_dropdown = ttk.Combobox(root, textvariable=max_recipients_var, values=max_recipients_options, state="readonly")
+    max_recipients_dropdown.pack()
+    max_recipients_dropdown.bind('<<ComboboxSelected>>', update_max_recipients)
+
+    # Ensure the default value is selected
+    max_recipients_dropdown.current(max_recipients_options.index(max_recipients_var.get()))
+
+    tethering_checkbox = tk.Checkbutton(root, text="테더링 모드 활성화", variable=tethering_var)
+    tethering_checkbox.pack()
+
+    start_btn = tk.Button(root, text="시작하기", command=start_thread)
+    start_btn.pack()
+    # GUI 구성 요소 추가
+    progress_text = tk.Text(root)
+    progress_text.pack(fill=tk.BOTH, expand=True)
+
+    root.mainloop()
+
+if __name__ == "__main__":
+    main()
