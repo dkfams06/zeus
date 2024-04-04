@@ -1,0 +1,573 @@
+from selenium import webdriver
+from selenium.webdriver.common.by import By
+import autoit
+from selenium.webdriver.support.ui import WebDriverWait
+import os
+from selenium.webdriver.support import expected_conditions as EC
+from selenium.webdriver.common.action_chains import ActionChains
+from selenium.webdriver.common.keys import Keys
+from selenium.common.exceptions import NoAlertPresentException
+import time
+from datetime import datetime
+import pickle  # 파일 저장 및 불러오기를 위해 필요
+import tkinter as tk
+from tkinter import ttk
+import tkinter.filedialog as filedialog
+import threading
+import pandas as pd
+from tkinter import PhotoImage
+from selenium.common.exceptions import NoSuchElementException, ElementClickInterceptedException, TimeoutException
+from bs4 import BeautifulSoup
+import pyperclip
+import random
+from ppadb.client import Client as AdbClient
+import tkinter.messagebox as messagebox
+from selenium import webdriver
+import webbrowser
+
+time3 = random.uniform(0.001, 0.01)
+global_driver = None
+
+def toggle_airplane_mode():
+    if tethering_var.get() == 1:
+        print_to_textbox("ip주소를 변경합니다.")
+        # Connect to the ADB server
+        adb = AdbClient(host="127.0.0.1", port=5037)
+
+        devices = adb.devices()
+        if len(devices) == 0:
+            print("No device attached")
+            quit()
+
+        device = devices[0]
+        # Turn on airplane mode
+        device.shell("settings put global airplane_mode_on 1")
+        device.shell("am broadcast -a android.intent.action.AIRPLANE_MODE --ez state true")
+        time.sleep(5)
+
+        device.shell("settings put global airplane_mode_on 0")
+        device.shell("am broadcast -a android.intent.action.AIRPLANE_MODE --ez state false")
+        time.sleep(20)
+        
+
+def setup_chrome_driver():
+    chrome_driver_path = "C:\Program Files\Google\Chrome\Application\chrome.exe"
+    driver = webdriver.Chrome()
+    return driver
+
+
+# 로그인 버튼 클릭 시 실행되는 함수
+def on_login_button_click():
+    global global_driver, band_listbox
+    my_id = id_entry.get()
+    my_pw = pw_entry.get()
+    global_driver = setup_chrome_driver()
+    thread = threading.Thread(target=login_and_update, args=(my_id, my_pw, band_listbox))
+    thread.daemon = True  # Set as a daemon so it doesn't prevent the app from exiting
+    thread.start()
+
+
+def login_and_update(my_id, my_pw, band_listbox):
+    global global_driver
+    time.sleep(1)
+    toggle_airplane_mode()
+    login(global_driver, my_id, my_pw)
+    update_band_list(band_listbox)
+    
+
+def login(driver, my_id, my_pw):
+    login_url = "https://auth.band.us/login_page?next_url=https%3A%2F%2Fband.us%2Fhome%3Freferrer%3Dhttps%253A%252F%252Fband.us%252Fsetting"
+
+    driver.get(login_url)
+    time.sleep(1)
+    naver_btn_selector = ".externalLogin"
+    naver_btn = driver.find_element(By.CSS_SELECTOR, naver_btn_selector)
+    naver_btn.click()
+    time.sleep(1.5)
+
+    # "switch_btn" 요소를 찾고, 내부의 "span" 요소의 텍스트가 "off"인지 확인합니다.
+    switch_btn = driver.find_element(By.CSS_SELECTOR, ".switch_btn")
+    switch_status = driver.find_element(By.CSS_SELECTOR, ".switch_btn .blind").text
+
+    # switch_status가 "off"일 경우에만 클릭합니다.
+    if switch_status.lower() == "on":
+        switch_btn.click()
+    time.sleep(1)
+    id_selector = "#id"
+    pw_selector = "#pw"
+    login_btn_selector = "#log\\.login"
+    id_input = driver.find_element(By.CSS_SELECTOR, id_selector)
+    pw_input = driver.find_element(By.CSS_SELECTOR, pw_selector)
+    login_btn = driver.find_element(By.CSS_SELECTOR, login_btn_selector)
+    id_input.click()
+    pyperclip.copy(my_id)
+    ActionChains(driver).key_down(Keys.CONTROL).send_keys("v").key_up(Keys.CONTROL).perform()
+    pw_input.click()
+    pyperclip.copy(my_pw)
+    ActionChains(driver).key_down(Keys.CONTROL).send_keys("v").key_up(Keys.CONTROL).perform()
+    login_btn.click()
+    time.sleep(1)
+    try:
+        dont_save_button = driver.find_element(By.ID, "new.dontsave")
+        dont_save_button.click()
+        time.sleep(1)  # Wait for 1 second to let the page react to the button click.
+    except NoSuchElementException:
+        pass
+    
+    # 알림창을 표시하고 사용자가 '확인' 버튼을 누를 때까지 대기
+    user_response = messagebox.showinfo("로그인 확인", "밴드 창이 떴으면 확인을 눌러주세요.")
+
+    # 사용자가 '확인' 버튼을 누른 후의 코드
+    if user_response:
+        pass
+    return
+        
+
+
+band_listbox = None
+def update_band_list(band_listbox):
+    global band_info_list  # 전역 변수 사용 선언
+    global global_driver
+    time.sleep(3)
+    band_info_list = []  # 밴드 정보를 저장할 리스트
+    req = global_driver.page_source
+    soup = BeautifulSoup(req, 'html.parser')
+
+    for li in soup.find_all('li', class_='bandCardItem'):
+        band_link_tag = li.find('a', class_='bandCover _link')
+        band_name_tag = li.find('p', class_='uriText')
+
+        if band_link_tag and band_name_tag:
+            band_name = band_name_tag.get_text(strip=True)
+            band_url = band_link_tag['href']
+            band_info_list.append((band_name, band_url))  # 밴드 이름과 URL 저장
+
+    band_listbox.delete(0, 'end')  # 리스트박스의 기존 항목을 모두 삭제
+    for band_name, _ in band_info_list:
+        band_listbox.insert('end', band_name)  # 카페 이름을 리스트박스에 추가
+
+
+
+def filter_and_display_band(search_term):
+    band_listbox.delete(0, tk.END)  # 기존 리스트박스 내용을 지움
+    filtered_bands = [band for band in band_info_list if search_term.lower() in band[0].lower()]
+    for band in filtered_bands:
+        band_listbox.insert(tk.END, band[0])  # 필터링된 카페 이름을 리스트박스에 추가
+
+
+def add_placeholder_band(entry, placeholder, callback=None):
+    """Entry 위젯에 플레이스홀더와 선택적 콜백 함수를 추가하는 함수"""
+    entry.insert(0, placeholder)
+    entry.config(fg='grey')
+    entry.bind("<FocusIn>", lambda event: on_entry_click(event, placeholder))
+    entry.bind("<FocusOut>", lambda event: on_focusout(event, placeholder))
+
+    if callback:
+        # 사용자 입력에 반응하여 콜백 함수 호출
+        entry.bind("<KeyRelease>", lambda event: callback())
+
+def on_entry_click(event, placeholder):
+    """Entry 위젯 클릭 시 실행되는 이벤트 핸들러"""
+    if event.widget.get() == placeholder:
+        event.widget.delete(0, "end")
+        event.widget.insert(0, '')
+        event.widget.config(fg='black')
+
+def on_focusout(event, placeholder):
+    """Entry 위젯 포커스가 사라졌을 때 실행되는 이벤트 핸들러"""
+    if event.widget.get() == '':
+        event.widget.insert(0, placeholder)
+        event.widget.config(fg='grey')
+
+
+def on_band_select_and_update_treeview():
+    current_entries = tree.get_children()
+    row_number = len(current_entries) + 1  # Start from the next number
+
+    selected_indices = band_listbox.curselection()
+    for i in selected_indices:
+        band_name = band_listbox.get(i)
+        for band in band_info_list:
+            if band[0] == band_name:
+                band_url = band[1]
+                new_row_id = tree.insert("", tk.END, values=(row_number, band_name, band_url))
+                tree.selection_set(new_row_id)
+                tree.see(new_row_id)
+                row_number += 1
+
+def all_band_select():
+    if select_all_var.get() == 1:
+        band_listbox.selection_set(0, tk.END)
+    if select_all_var.get() == 0:
+        band_listbox.selection_clear(0, tk.END)
+
+
+# 선택된 행을 삭제하는 함수
+def delete_selected_item():
+    selected_item = tree.selection()  # 현재 선택된 행
+    if selected_item:
+        tree.delete(selected_item)
+    # 행 삭제 후 행 번호 재정렬
+    for index, item in enumerate(tree.get_children()):
+        tree.set(item, '#1', index+1)  # 첫 번째 열('#1')을 새로운 순서 번호로 업데이트
+
+# 모든 행을 삭제하는 함수
+def all_delete_selected_item():
+    for item in tree.get_children():
+        # 각 항목을 삭제합니다.
+        tree.delete(item)
+
+file_types = {}
+file_paths_dict = {}
+image_files_dict = {}
+
+# 파일 목록을 업데이트하는 함수
+def update_file_listbox(post_listbox, file_extension_list):
+    global file_paths_dict, file_types, image_files_dict
+    folder_path = filedialog.askdirectory()
+    if folder_path:
+        file_paths = [os.path.join(folder_path, f) for f in os.listdir(folder_path) if any(f.endswith(ext) for ext in file_extension_list)]
+        file_titles = [os.path.splitext(os.path.basename(f))[0] for f in file_paths]
+
+
+        post_listbox.delete(0, tk.END)
+        file_types.clear()
+        image_files_dict.clear()
+
+        for file_title, file_path in zip(file_titles, file_paths):
+            post_listbox.insert(tk.END, file_title)
+            # Update the file_types dictionary
+            if file_path.lower().endswith('.txt'):
+                file_types[file_title] = 'text'
+                file_paths_dict[file_title] = file_path
+            elif file_path.lower().endswith(('.jpg', '.png')):
+                file_types[file_title] = 'image'
+                if 'images' not in image_files_dict:
+                    image_files_dict['images'] = []
+                image_files_dict['images'].append(file_path)
+
+def update_treeview_with_selected_items(tree, post_listbox):
+    global file_types
+    selected_indices = post_listbox.curselection()
+    selected_files = [post_listbox.get(i) for i in selected_indices]
+    
+    text_files = [f for f in selected_files if file_types.get(f) == 'text']
+    image_files = [f for f in selected_files if file_types.get(f) == 'image']
+
+    selected_items = tree.selection()
+    for item_to_update in selected_items:
+        current_values = list(tree.item(item_to_update, 'values'))
+        while len(current_values) < 5:
+            current_values.append("")
+
+        if text_files:
+            current_values[3] = text_files[0]
+
+        if image_files:
+            current_values[4] = str(len(image_files))
+
+        tree.item(item_to_update, values=current_values)
+    
+
+def columns(tree):
+    columns = (
+        "번호", "밴드명", "밴드주소", "원고", "사진갯수")
+    tree['columns'] = columns
+    for col in columns:
+        tree.heading(col, text=col)
+        if col in ("번호", "사진갯수"):
+            tree.column(col, width=50)
+        else:
+            tree.column(col, width=80)
+        
+def save_treeview_data():
+    """트리뷰 데이터를 파일로 저장합니다."""
+    data = [(tree.item(item)['values']) for item in tree.get_children()]
+    filepath = filedialog.asksaveasfilename(defaultextension=".pkl", filetypes=[("Pickle files", "*.pkl")])
+    if filepath:
+        with open(filepath, 'wb') as outfile:
+            pickle.dump(data, outfile)
+        print_to_textbox(f"데이터가 저장되었습니다: {filepath}")
+
+def load_treeview_data():
+    """파일로부터 트리뷰 데이터를 불러와 트리뷰에 표시합니다."""
+    filepath = filedialog.askopenfilename(filetypes=[("Pickle files", "*.pkl")])
+    if filepath:
+        with open(filepath, 'rb') as infile:
+            data = pickle.load(infile)
+        for item in data:
+            tree.insert("", tk.END, values=item)
+        print_to_textbox(f"데이터가 불러와졌습니다: {filepath}")
+
+#실행
+def print_to_textbox(message):
+    global text_area
+    text_area.insert(tk.END, message + "\n")
+    text_area.see(tk.END)  # 스크롤 자동 이동
+
+
+def start_posting_process():
+    def thread_function():
+        global global_driver, tree, count_entry, delay1_entry, delay2_entry, text_area, file_paths_dict
+        count = int(count_entry.get())
+        delay_sec = int(delay1_entry.get())
+        delay_min = int(delay2_entry.get())
+        post_menu = {}
+        
+        for iteration in range(count):
+            for row_id in tree.get_children():
+                tree.selection_set(row_id)
+                tree.see(row_id)
+                row_data = tree.item(row_id, 'values')
+                
+                if len(row_data) > 3 and row_data[3].strip() in file_paths_dict:
+                    band_name = row_data[1]
+                    band_url = row_data[2]
+                    post_filename = row_data[3].strip()
+                    file_path = file_paths_dict.get(post_filename, "")
+                    if file_path:
+                        global_driver.get("https://band.us" + band_url)
+                        time.sleep(2)
+                        try:
+                            write_button = global_driver.find_element(By.CSS_SELECTOR, ".cPostWriteEventWrapper._btnOpenWriteLayer")
+                            global_driver.execute_script("arguments[0].click();", write_button)
+                            time.sleep(2)  # Wait for the post editor to open.
+                        except (NoSuchElementException, TimeoutException):
+                            print_to_textbox(f"글쓰기 할 수 없는 밴드입니다: {band_name}")
+                            continue   
+                        with open(file_path, 'r', encoding='utf-8') as file:
+                            post_content = file.read().split('\n')
+                        
+                        # 글쓰기 영역 활성화를 위해 클릭
+                        content_editor = global_driver.find_element(By.CSS_SELECTOR, "div.contentEditor._richEditor")
+                        ActionChains(global_driver).move_to_element(content_editor).click().perform()
+                        time.sleep(1)
+                        
+                        for line in post_content:
+                            pyperclip.copy(line)
+                            for char in line:
+                                ActionChains(global_driver).send_keys(char).perform()
+                                time.sleep(time3)
+                            ActionChains(global_driver).send_keys(Keys.ENTER).perform()
+                            time.sleep(time3)
+                        
+                        # 이미지 추가
+                        if len(row_data) > 4 and row_data[4].isdigit():
+                            image_count = int(row_data[4])
+                            if image_count > 0:
+                                uploaded_images = 0
+                                time.sleep(1)        
+                                for image_path in image_files_dict.get('images', []):
+                                    if uploaded_images < image_count:
+                                        image_button = global_driver.find_element(By.CSS_SELECTOR, "#wrap > div.layerContainerView > div > div > section > div > div > div > div.buttonArea._bottomToolbar > ul > li:nth-child(1) > label > svg")
+                                        image_button.click()
+                                        time.sleep(1)        
+
+                                        autoit.win_wait_active("열기", 5)
+                                        image_path = image_path.replace('/', '\\')
+                                        autoit.control_set_text("열기", "Edit1", image_path)
+                                        autoit.control_click("열기", "Button1")
+                                        time.sleep(2)
+                                        uploaded_images += 1
+                        
+                                        attach_button = global_driver.find_element(By.CSS_SELECTOR, "button.uButton.-confirm._submitBtn")
+                                        attach_button.click()
+                                        time.sleep(1.5)
+                                    
+                    # "게시" 버튼 클릭하여 게시물 게시
+                    post_button = WebDriverWait(global_driver, 1).until(
+                        EC.element_to_be_clickable((By.CSS_SELECTOR, "button.uButton.-sizeM._btnSubmitPost.-confirm"))
+                    )
+                    post_button.click()
+                    print(1)
+                    input()
+                    
+                    time.sleep(1)  # 게시 완료될 때까지 기다림
+                    print_to_textbox(f"글쓰기 완료: {band_name}")
+            
+                    print_to_textbox(f"{delay_sec} 초 동안 대기") 
+                    time.sleep(delay_sec)
+                else:
+                    continue
+            print_to_textbox(f"반복 {iteration + 1}/{count} 완료")
+            print_to_textbox(f"{delay_min} 분 동안 대기") 
+            time.sleep(delay_min * 60)
+        
+        print_to_textbox("작업 완료") 
+        global_driver.quit()
+    thread = threading.Thread(target=thread_function)
+    thread.start()
+
+def main():
+    global id_entry, pw_entry
+    global tethering_var
+    global search_band_var
+    global band_listbox
+    global select_all_var
+    global tree
+    global post_listbox
+    global text_area
+    global count_entry, delay1_entry, delay2_entry
+
+    # Tkinter 창 설정
+    root = tk.Tk()
+    root.title("밴드 자동 글쓰기")
+    root.geometry("800x750")  # 전체 창 크기 조정
+
+    # PanedWindow 설정
+    paned_window = tk.PanedWindow(root, orient=tk.HORIZONTAL)
+    paned_window.pack(fill=tk.BOTH, expand=True)
+
+    # 왼쪽 프레임 설정
+    frame_left = tk.Frame(paned_window)
+    paned_window.add(frame_left, width=300)
+
+    # 오른쪽 프레임 설정
+    frame_right = tk.Frame(paned_window)
+    paned_window.add(frame_right, width=50)
+
+    # 로그인 정보 입력 섹션
+    login_frame = ttk.LabelFrame(frame_left, text="로그인 정보")
+    login_frame.pack(fill=tk.X, padx=10, pady=5)
+
+    ttk.Label(login_frame, text="네이버 아이디:").pack(side=tk.TOP, padx=(10, 2))
+    id_entry = ttk.Entry(login_frame, width=30)
+    id_entry.pack(side=tk.TOP, padx=(0, 10))
+
+    ttk.Label(login_frame, text="네이버 비밀번호:").pack(side=tk.TOP)
+    pw_entry = ttk.Entry(login_frame, width=30, show="*")
+    pw_entry.pack(side=tk.TOP, padx=(0, 10))
+
+    # 체크박스 상태를 저장할 변수
+    tethering_var = tk.IntVar()
+
+    # 체크박스 추가
+    tethering_checkbox = tk.Checkbutton(login_frame, text="테더링모드 실행", variable=tethering_var)
+    tethering_checkbox.pack(side=tk.TOP, pady=5)
+
+    login_button = ttk.Button(login_frame, text="로그인", command=on_login_button_click)
+    login_button.pack(side=tk.TOP, padx=10)
+
+    # 밴드 리스트 섹션
+    band_frame = ttk.LabelFrame(frame_left, text="밴드 목록")
+    band_frame.pack(fill=tk.BOTH,padx=10, pady=5)
+    # 밴드 리스트와 스크롤바를 포함할 프레임
+    listbox_frame = ttk.Frame(band_frame)
+    listbox_frame.pack(fill=tk.BOTH, expand=True)
+
+
+    search_band_var = tk.StringVar()
+    #search_band_var.trace_add("write", lambda *args: filter_and_display_bands(search_band_var.get()))
+    search_band_entry = tk.Entry(listbox_frame, textvariable=search_band_var)
+    search_band_entry.pack()
+
+    # 플레이스홀더 추가 및 검색 함수 연결
+    add_placeholder_band(search_band_entry, "밴드 검색", lambda: filter_and_display_band(search_band_var.get()))
+
+    band_listbox = tk.Listbox(listbox_frame, height=5)
+    band_listbox.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
+
+    scrollbar = ttk.Scrollbar(listbox_frame, orient="vertical", command=band_listbox.yview)
+    scrollbar.pack(side=tk.RIGHT, fill=tk.Y)
+
+    band_listbox.config(yscrollcommand=scrollbar.set)
+
+    # Position the checkbox below the listbox
+    select_all_var = tk.IntVar(value=0)
+    select_all_checkbox = tk.Checkbutton(band_frame , text="전체 선택", variable=select_all_var, onvalue=1, offvalue=0, command=all_band_select)
+    select_all_checkbox.pack(fill=tk.X, padx=5, pady=5) 
+
+    select_cafe_button = tk.Button(band_frame , text="밴드 선택", command=on_band_select_and_update_treeview)
+    select_cafe_button.pack()
+
+    # 밴드 리스트 섹션
+    post_frame = ttk.LabelFrame(frame_left, text="원고 작성")
+    post_frame.pack(fill=tk.BOTH,padx=10, pady=5)
+
+    # 밴드 리스트와 스크롤바를 포함할 프레임
+    load_buttons_frame = ttk.Frame(post_frame)
+    load_buttons_frame.pack(fill=tk.BOTH, expand=True)
+
+
+    # 게시물 불러오기 버튼
+    load_posts_button = tk.Button(load_buttons_frame, text="게시물 불러오기", command=lambda: update_file_listbox(post_listbox, ['.txt']))
+    load_posts_button.pack(pady=5)
+
+    # 이미지 목록 불러오기 버튼
+    load_images_button = tk.Button(load_buttons_frame, text="이미지 목록 불러오기", command=lambda: update_file_listbox(post_listbox, ['.jpg', '.png']))
+    load_images_button.pack(pady=5)
+
+    
+    post_listbox = tk.Listbox(load_buttons_frame, height=5, selectmode='extended')
+    post_listbox.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
+
+    scrollbar = ttk.Scrollbar(load_buttons_frame, orient="vertical", command=post_listbox.yview)
+    scrollbar.pack(side=tk.RIGHT, fill=tk.Y)
+
+    post_listbox.config(yscrollcommand=scrollbar.set)
+
+    # 선택된 항목 업데이트 버튼
+    update_selected_button = tk.Button(post_frame, text="선택", command=lambda: update_treeview_with_selected_items(tree, post_listbox))
+    update_selected_button.pack(side=tk.TOP, padx=5)
+
+    action_frame = ttk.LabelFrame(frame_left, text="실행")
+    action_frame.pack(fill=tk.X, padx=10, pady=5)
+
+    ttk.Label(action_frame, text="글 작성 딜레이(초)").pack(side=tk.TOP, padx=(10, 2))
+    delay1_entry = ttk.Entry(action_frame, width=30)
+    delay1_entry.pack(side=tk.TOP, padx=(0, 10))
+
+    ttk.Label(action_frame, text="작업 반복 횟수(번)").pack(side=tk.TOP, padx=(10, 2))
+    count_entry = ttk.Entry(action_frame, width=30)
+    count_entry.pack(side=tk.TOP, padx=(0, 10))
+
+    ttk.Label(action_frame, text="대기 후(분):").pack(side=tk.TOP)
+    delay2_entry = ttk.Entry(action_frame, width=30)
+    delay2_entry.pack(side=tk.TOP, padx=(0, 10))
+
+    action_button = ttk.Button(action_frame, text="시작", command=start_posting_process)
+    action_button.pack(side=tk.TOP, padx=10)
+
+    # 밴드 리스트 섹션
+    data_frame = ttk.LabelFrame(frame_right, text="작업리스트")
+    data_frame.pack(fill=tk.BOTH,padx=10, pady=15,expand=True)
+
+    # 트리뷰 섹션
+    tree_frame = ttk.Frame(data_frame, height=50)
+    tree_frame.pack(fill=tk.BOTH, padx=10, pady=5, expand=True)
+
+    tree = ttk.Treeview(tree_frame, show='headings')
+    tree.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
+
+    columns(tree)  # 컬럼 설정 함수 호출
+
+    tree_scroll = ttk.Scrollbar(tree_frame, orient="vertical", command=tree.yview)
+    tree_scroll.pack(side=tk.RIGHT, fill="y")
+    tree.configure(yscrollcommand=tree_scroll.set)
+
+    # 삭제 버튼 생성 및 이벤트 연결
+    all_delete_button = tk.Button(data_frame, text="전체삭제", command=all_delete_selected_item)
+    all_delete_button.pack(side=tk.LEFT, padx=5)
+
+    # 삭제 버튼 생성 및 이벤트 연결
+    delete_button = tk.Button(data_frame, text="삭제", command=delete_selected_item)
+    delete_button.pack(side=tk.LEFT, padx=5)
+    
+    save_button = ttk.Button(data_frame, text="데이터 저장", command=save_treeview_data)
+    save_button.pack(side=tk.RIGHT, padx=5)
+
+    load_button = ttk.Button(data_frame, text="데이터 불러오기", command=load_treeview_data)
+    load_button.pack(side=tk.RIGHT, padx=5)
+
+
+    tk.Label(frame_right).pack()
+
+
+    text_frame = ttk.LabelFrame(frame_right, text="로그")
+    text_frame.pack(fill=tk.BOTH, padx=10, pady=10)
+
+    text_area = tk.Text(text_frame, height=22)  # 텍스트 창의 높이 설정
+    text_area.pack(fill=tk.BOTH, padx=10, pady=10)
+    tk.Label(frame_right).pack()
+
+    root.mainloop()
