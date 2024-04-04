@@ -1,0 +1,85 @@
+from selenium import webdriver
+from selenium.webdriver.common.by import By
+from selenium.webdriver.support.ui import WebDriverWait
+from selenium.webdriver.support import expected_conditions as EC
+from selenium.webdriver import ActionChains
+from selenium.webdriver.common.action_chains import ActionChains
+from selenium.webdriver.common.keys import Keys
+import time
+import pandas as pd
+from selenium.common.exceptions import NoSuchElementException
+from bs4 import BeautifulSoup
+import re
+import pyperclip
+from selenium.common.exceptions import TimeoutException  # TimeoutException 임포트
+import requests
+import os
+
+chrome_options = webdriver.ChromeOptions()
+#chrome_options.add_argument("--headless")  # 웹 브라우저를 숨겨 실행하려면 주석 해제
+chrome_driver_path = "C:\Program Files\Google\Chrome\Application\chrome.exe"
+driver = webdriver.Chrome(options=chrome_options)
+
+
+#driver.get('https://section.cafe.naver.com/ca-fe/home/themes/9')  # 웹 페이지 접속
+driver.get('https://section.cafe.naver.com/ca-fe/home/themes/9/sub-themes/193?type=ac')
+
+time.sleep(1)  # 페이지 로딩 대기
+
+file_name = "자동차전부추출.xlsx"
+if not os.path.exists(file_name):
+    df_combined = pd.DataFrame(columns=['카페명', '카페주소','카페등급'])
+
+else:
+    df_combined = pd.read_excel(file_name)
+
+# 전체 페이지 수 설정
+total_pages = 100  # 필요한 페이지 수에 따라 설정
+current_page = 1
+while current_page <= total_pages:
+    for i in range(1, 16):  # 1번부터 15번까지 클릭
+        #try:
+        cafe_selector = f"#mainContainer > div.cafe_type.themes.content > div > div.home_theme_frame > div:nth-child({i})"
+        cafe_element = driver.find_element(By.CSS_SELECTOR, cafe_selector)
+        #if '숲' in cafe_element.text:
+        ActionChains(driver).key_down(Keys.CONTROL).click(cafe_element).key_up(Keys.CONTROL).perform()
+        driver.switch_to.window(driver.window_handles[-1])
+        time.sleep(0.5)  # Better to use WebDriverWait here
+        current_url = driver.current_url
+        time.sleep(0.5)
+        driver.close()
+        driver.switch_to.window(driver.window_handles[0])
+        cafe_name_selector = f"#mainContainer > div.cafe_type.themes.content > div > div.home_theme_frame > div:nth-child({i}) > a > div.cafe_info_area > strong"
+        cafe_name = driver.find_element(By.CSS_SELECTOR, cafe_name_selector).text
+        cafe_level_selector = f"#mainContainer > div.cafe_type.themes.content > div > div.home_theme_frame > div:nth-child({i}) > a > div.cafe_info_area > div.cafe_info_detail > div:nth-child(3) > span.data"
+        cafe_level= driver.find_element(By.CSS_SELECTOR, cafe_level_selector).text
+        new_data = pd.DataFrame({'카페명': [cafe_name], '카페주소': [current_url], '카페등급':[cafe_level]})
+        df_combined = pd.concat([df_combined, new_data], ignore_index=True)
+        df_combined.to_excel(file_name, index=False)
+
+            
+        # except Exception as e:
+        #     print(f"An error occurred: {e}")
+        #     continue
+            
+    # 페이지 이동 로직
+    if current_page % 10 == 0 and current_page < total_pages:
+        next_button = driver.find_element(By.CSS_SELECTOR, '.ArticlePaginate .btn.type_next')
+        next_button.click()
+    elif current_page < total_pages:
+        next_page_num = (current_page % 10) + 1
+        page_buttons = driver.find_elements(By.CSS_SELECTOR, '.ArticlePaginate .btn.number')
+        for btn in page_buttons:
+            if btn.text == str(next_page_num):
+                btn.click()
+                break
+
+    current_page += 1
+    time.sleep(2)
+
+# 드라이버 종료
+driver.quit()
+
+print("Data extraction and excel file creation completed.")
+
+
