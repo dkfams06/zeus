@@ -1,0 +1,58 @@
+from urllib import parse
+import re, os, sys, time
+
+from selenium import webdriver
+from selenium.webdriver.common.by import By
+import chromedriver_autoinstaller
+from openpyxl import Workbook
+from colorama import init, Back 
+wb = Workbook()
+
+# grab the active worksheet
+ws = wb.active
+
+chrome_driver_path = "C:\Program Files\Google\Chrome\Application\chrome.exe"
+driver = webdriver.Chrome()
+
+pattern = r'\$\("article_(\w+)_'
+
+추출한_아이디 = []
+
+menu ="투체인즈앤일리아스"
+link1 = "https://cafe.naver.com/illnesses?iframe_url=/ArticleList.nhn%3Fsearch.clubid=20635410%26search.menuid=217%26search.boardtype=L"
+
+
+links = [link1]
+
+for link in links: # link1, link2, link3 에 대해서
+    
+    for page_idx in range(1,2): # link1 1-10 , link2 1-10, link3 1-10
+        page_link = link+f"%26search.page={page_idx}%26search.cafeId=10050146%26search.totalCount=151"
+        driver.get(page_link)
+        time.sleep(1)
+        driver.switch_to.frame(driver.find_element(By.NAME, "cafe_main"))
+        #여기 부분까지는 기존에 iframe을 따로 빼온, 서버에서 추출해온 코드
+        HTML = driver.page_source
+        result = re.findall(pattern, HTML)
+        filtered_result = [id for id in result if not id.startswith("man_") and not id.startswith("staff_")]
+        추출한_아이디.extend(filtered_result)
+        time.sleep(1)
+        
+        if len(result) < 1:
+            FLAG = True
+            print(Back.YELLOW+"더 추출할 게시글이 없어서 프로그램을 종료합니다")
+            break
+        print(추출한_아이디)
+        print(len(추출한_아이디))
+
+        추출한_아이디 = list(set(추출한_아이디))
+
+        row_index = 1
+        for 아이디 in 추출한_아이디:
+            ws.cell(row=row_index,column=1).value = 아이디
+            ws.cell(row=row_index,column=2).value = 아이디+"@naver.com"
+            row_index = row_index + 1
+        #cur_time = time.strftime("%Y_%m_%d_%H_%M_%S",time.localtime(time.time()))
+        wb.save(f"{menu}.xlsx")
+
+input()
